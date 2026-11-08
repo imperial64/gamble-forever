@@ -1,12 +1,21 @@
 # BigWigs packager configuration (same setup as dynamic-ambiance-forever).
 package-as: GambleForever
 
+# The addon lives in addons/GambleForever; the zip's GambleForever folder is that folder.
 move-folders:
-  Deathroll/addons/GambleForever: GambleForever
+  GambleForever/addons/GambleForever: GambleForever
 
+manual-changelog:
+  filename: CHANGELOG.md
+  markup-type: markdown
+
+# Everything that is not the addon. Files starting with a dot are never packaged.
 ignore:
   - mockup
   - spike
   - scripts
   - tests
+  - feedback
   - README.md
+  - CHANGELOG.md
+  - ROADMAP.md
