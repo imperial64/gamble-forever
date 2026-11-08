@@ -118,7 +118,13 @@ function Scene.seat(parent)
 
     -- state: nil, "turn", "out", "win"
     function s:SetState(state)
+        local prev = self.state
         self.state = state
+        -- a new round: the last loser gets up from the death pose, the last winner stops cheering
+        if (prev == "out" or prev == "win") and state ~= prev and self.shownModel then
+            self.animToken = (self.animToken or 0) + 1
+            self.actor:SetAnimation(ANIM.idle, 0, 1)
+        end
         local r, g, b, al = 1, .75, .3, .25
         if state == "turn" then r, g, b, al = 1, .82, 0, .7
         elseif state == "win" then r, g, b, al = 1, .9, .3, 1

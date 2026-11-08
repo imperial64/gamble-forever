@@ -298,7 +298,7 @@ local function refresh()
         W.num:SetText(t.start)
         W.turn:SetText("")
         W.range:SetText(("Waiting for players  %d / %d"):format(n, t.maxSeats))
-        W.status:SetText(c.hosting and (n >= 2 and "Press Start when everyone is seated." or "Invite friends to your group; they find this table in /dr.")
+        W.status:SetText(c.hosting and (n >= 2 and "Press Start when everyone is seated." or "")
             or "Waiting for the host to start.")
     elseif t.phase == "first" then
         if not W.spinning then W.num:SetText(t.start) end
