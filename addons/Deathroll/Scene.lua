@@ -79,8 +79,10 @@ function Scene.seat(parent)
     pt:SetTexture(ns.media .. "ui\\btn_dark.png")
     pt:SetAllPoints()
     s.name = s.plate:CreateFontString(nil, "OVERLAY")
-    s.name:SetFont("Fonts\\FRIZQT__.TTF", 14, "OUTLINE")
-    s.name:SetPoint("TOP", 0, -7)
+    s.name:SetFont("Fonts\\FRIZQT__.TTF", 12, "OUTLINE")
+    s.name:SetPoint("TOP", 0, -8)
+    s.name:SetWidth(160)
+    s.name:SetWordWrap(false)
     s.note = s.plate:CreateFontString(nil, "OVERLAY")
     s.note:SetFont("Fonts\\FRIZQT__.TTF", 11, "")
     s.note:SetPoint("TOP", s.name, "BOTTOM", 0, -2)
@@ -94,7 +96,7 @@ function Scene.seat(parent)
         self.shownModel = visible
         local class = self.unit and select(2, UnitClass(self.unit))
         local color = class and RAID_CLASS_COLORS and RAID_CLASS_COLORS[class]
-        self.name:SetText(name and name:match("^[^ %-]+") or "")
+        self.name:SetText(name and name:match("^[^%-]+") or "")   -- "First Last", like everywhere on Forever
         if color then self.name:SetTextColor(color.r, color.g, color.b) else self.name:SetTextColor(1, 1, 1) end
         if visible then
             self.crest:Hide(); self.far:Hide(); sc:Show()

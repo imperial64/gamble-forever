@@ -60,18 +60,24 @@ end
 
 ---------------------------------------------------------------- events from the pure modules
 
+-- Practice bots roll whenever the rules let them; one roll per step each.
+local botStep = {}
 local function botTurn()
     local c = ns.Table.current()
     if not (c and c.hosting) then return end
-    local who, lo, hi = ns.Games[c.t.game].expect(c.t)
-    if who and ns.bots[who] and c.t.phase == "rolling" then
-        local round, cur = c.t.round, c.t.cur
-        C_Timer.After(1.4, function()
-            local c2 = ns.Table.current()
-            if c2 == c and c.t.round == round and c.t.cur == cur and c.t.phase == "rolling" then
-                ns.Table.onRoll(who, math.random(lo, hi), lo, hi)
-            end
-        end)
+    local g, t = ns.Games[c.t.game], c.t
+    for name in pairs(ns.bots) do
+        local lo, hi = g.rangeFor(t, name)
+        local step = table.concat({ t.round or 0, t.phase, t.cur or 0, tostring(t.tieRolls) }, ":")
+        if lo and botStep[name] ~= step then
+            botStep[name] = step
+            C_Timer.After(.8 + math.random() * 1.4, function()
+                local lo2, hi2 = g.rangeFor(t, name)
+                if ns.Table.current() == c and lo2 == lo and hi2 == hi then
+                    ns.Table.onRoll(name, math.random(lo, hi), lo, hi)
+                end
+            end)
+        end
     end
 end
 
@@ -157,6 +163,7 @@ f:SetScript("OnEvent", function(_, ev, ...)
         ns.Stage.restoreLeftovers()
     elseif ev == "PLAYER_LOGIN" then
         ns.UI.init()
+        ns.Table.who()   -- its echo tells us our full "First Last" name before any table opens
     elseif ev == "PLAYER_LOGOUT" then
         ns.Stage.restoreCamera()
     elseif ev == "CHAT_MSG_ADDON" then
@@ -186,16 +193,20 @@ end)
 
 ---------------------------------------------------------------- slash command
 
-local BOT_NAMES = { "Grizzlenut", "Thoradin", "Mirabelle", "Kaelra", "Fennick" }
+local BOT_NAMES = { "Grizzlenut Sparkfuse", "Thoradin Ironbrew", "Mirabelle Ashvale", "Kaelra Moonwhisper",
+    "Fennick Brightwhisk", "Dorn Stonehelm", "Ysolde Fairwind", "Halvar Deepforge", "Sirelle Dawnmere",
+    "Bramble Tinkerspan", "Ostrik Gravelmaw", "Velia Starfall" }
 
 SLASH_DEATHROLL1 = "/dr"
 SLASH_DEATHROLL2 = "/deathroll"
 SlashCmdList.DEATHROLL = function(m)
-    local cmd, a = strsplit(" ", (m or ""):lower())
-    if cmd == "test" then
+    local cmd, a, b = strsplit(" ", (m or ""):lower())
+    if cmd == "test" then   -- /dr test [bots] [deathroll|highlow]
         if ns.Table.current() then ns.Table.close() end
-        ns.Table.open({ game = "deathroll", wager = 2550, start = 1000, maxSeats = 6, chips = true, stamp = time() })   -- 25s 50c
-        for i = 1, math.min(tonumber(a) or 1, 5) do
+        local gameId = ns.Games[b or ""] and b or "deathroll"
+        local g = ns.Games[gameId]
+        ns.Table.open({ game = gameId, wager = 2550, start = 1000, maxSeats = g.maxSeats, chips = true, stamp = time() })   -- 25s 50c
+        for i = 1, math.min(tonumber(a) or 1, g.maxSeats - 1, #BOT_NAMES) do
             ns.bots[BOT_NAMES[i]] = true
             ns.Table.addBot(BOT_NAMES[i])
         end
