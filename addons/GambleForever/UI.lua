@@ -267,7 +267,35 @@ local function sidePanel(title)
     return p
 end
 
-local SETTLE_ROWS = 4   -- keeps the card clear of the top-left seats (deathroll seat 3 tops out at y 235)
+-- Settle Up card: shows at most SETTLE_ROWS payments (keeps it clear of the top-left seats;
+-- deathroll seat 3 tops out at y 235); more scroll with the mouse wheel. Folds to its title bar.
+local SETTLE_ROWS, ROW_H = 4, 18
+
+local function settleRow(i)
+    local p = W.settle
+    local r = p.rows[i]
+    if not r then
+        local y = -(i - 1) * ROW_H
+        r = { who = font(p.list, FRIZ, 11, "", INK), amt = font(p.list, FRIZ, 11, "", INK_RED) }
+        r.who:SetPoint("TOPLEFT", 0, y)
+        r.who:SetWidth(200); r.who:SetJustifyH("LEFT"); r.who:SetWordWrap(false)
+        r.amt:SetPoint("TOPRIGHT", 0, y)
+        r.amt:SetJustifyH("RIGHT")
+        p.rows[i] = r
+    end
+    return r
+end
+
+local function layoutSettle()
+    local p = W.settle
+    local folded = GambleForeverDB.settings.settleFolded
+    local vis = math.min(p.count or 0, SETTLE_ROWS)
+    p.sf:SetShown(not folded); p.foot:SetShown(not folded)
+    p.sf:SetHeight(math.max(1, vis * ROW_H))
+    p.fold:SetLabel(folded and "+" or "-")
+    p.title:SetText(folded and ("Settle Up  (%d)"):format(p.count or 0) or "Settle Up")
+    p:SetHeight(folded and 38 or (34 + vis * ROW_H + 26))
+end
 
 local function buildPanels()
     W.rules = sidePanel("Rules")
@@ -282,23 +310,29 @@ local function buildPanels()
     p:SetSize(320, 130)
     p:SetPoint("TOPLEFT", 14, -14)
     p:SetFrameLevel(W.content:GetFrameLevel() + 20)
+    p:EnableMouse(true)
     local bg = p:CreateTexture(nil, "BACKGROUND")
     bg:SetTexture(art("parch"))
     bg:SetAllPoints()
-    local title = font(p, MORPHEUS, 18, "", INK_RED)
-    title:SetPoint("TOP", 0, -10)
-    title:SetText("Settle Up")
-    p.rows = {}
-    for i = 1, SETTLE_ROWS do
-        local y = -34 - (i - 1) * 18
-        local who = font(p, FRIZ, 11, "", INK)
-        who:SetPoint("TOPLEFT", 16, y)
-        who:SetWidth(200); who:SetJustifyH("LEFT"); who:SetWordWrap(false)
-        local amt = font(p, FRIZ, 11, "", INK_RED)
-        amt:SetPoint("TOPRIGHT", -16, y)
-        amt:SetJustifyH("RIGHT")
-        p.rows[i] = { who = who, amt = amt }
-    end
+    p.title = font(p, MORPHEUS, 18, "", INK_RED)
+    p.title:SetPoint("TOPLEFT", 16, -10)
+    p.fold = skinButton(p, "-", 26, 22, "dark", function()
+        GambleForeverDB.settings.settleFolded = not GambleForeverDB.settings.settleFolded
+        layoutSettle()
+    end, 14)
+    p.fold:SetPoint("TOPRIGHT", -10, -8)
+    local sf = CreateFrame("ScrollFrame", nil, p)
+    sf:SetPoint("TOPLEFT", 16, -34)
+    sf:SetSize(288, SETTLE_ROWS * ROW_H)
+    local list = CreateFrame("Frame", nil, sf)
+    list:SetSize(288, ROW_H)
+    sf:SetScrollChild(list)
+    sf:EnableMouseWheel(true)
+    sf:SetScript("OnMouseWheel", function(self, delta)
+        local max = math.max(0, list:GetHeight() - self:GetHeight())
+        self:SetVerticalScroll(math.min(max, math.max(0, self:GetVerticalScroll() - delta * 2 * ROW_H)))
+    end)
+    p.sf, p.list, p.rows = sf, list, {}
     p.foot = font(p, FRIZ, 9, "", INK)
     p.foot:SetPoint("BOTTOM", 0, 10)
     p:Hide()
@@ -323,6 +357,30 @@ local function buildPanels()
             k = k + 1
         end
     end
+end
+
+-- Coin seen from the front while it flips end over end: angle 0 shows heads, pi shows tails.
+-- The face squashes with |cos|; the edge peeks out below it with |sin|, so it reads as a thick coin.
+local COIN_SIZE, COIN_EDGE, COIN_REST = 140, 16, 30
+local function drawCoin(angle, y, scale, spin)
+    local cs, sn = math.cos(angle), math.abs(math.sin(angle))
+    local size = COIN_SIZE * scale
+    local h = math.max(1, size * math.abs(cs))
+    local face = cs >= 0 and "heads" or "tails"
+    if W.coinFace ~= face then
+        W.coinFace = face
+        W.coin:SetTexture(ns.media .. "coin_" .. face .. ".png")
+    end
+    local e = COIN_EDGE * scale * sn
+    W.coin:SetSize(size, h)
+    W.coin:SetPoint("CENTER", W.content, "CENTER", 0, y)
+    W.coinEdge:SetSize(size, h + e)
+    W.coinEdge:SetPoint("CENTER", W.content, "CENTER", 0, y - e / 2)
+    W.coin:SetRotation(spin or 0); W.coinEdge:SetRotation(spin or 0)
+    -- shadow on the felt: smaller and fainter the higher the coin is
+    local lift = math.min(1, math.max(0, (y - COIN_REST) / 240))
+    W.coinShadow:SetSize(size * (1.1 - .5 * lift), size * .35 * (1.1 - .5 * lift))
+    W.coinShadow:SetAlpha(1 - .7 * lift)
 end
 
 local function buildTable()
@@ -396,11 +454,21 @@ local function buildTable()
     -- Coinflip centre
     W.cf = CreateFrame("Frame", nil, c)
     W.cf:SetAllPoints()
-    W.coin = W.cf:CreateTexture(nil, "ARTWORK")
-    W.coin:SetTexture("Interface\\Icons\\INV_Misc_Coin_01")
-    W.coin:SetTexCoord(.08, .92, .08, .92)
-    W.coin:SetSize(140, 140)
-    W.coin:SetPoint("CENTER", c, "CENTER", 0, 30)
+    -- the coin: a face (heads or tails) over its edge, a shadow on the felt and a landing flash
+    W.coinShadow = W.cf:CreateTexture(nil, "BORDER")
+    W.coinShadow:SetTexture(ns.media .. "glow.png")
+    W.coinShadow:SetVertexColor(0, 0, 0, .55)
+    W.coinShadow:SetPoint("CENTER", c, "CENTER", 0, COIN_REST - COIN_SIZE / 2 + 4)
+    W.coinFlash = W.cf:CreateTexture(nil, "BACKGROUND")
+    W.coinFlash:SetTexture(ns.media .. "glow.png")
+    W.coinFlash:SetBlendMode("ADD")
+    W.coinFlash:SetVertexColor(1, .8, .3, 0)
+    W.coinFlash:SetSize(360, 360)
+    W.coinFlash:SetPoint("CENTER", c, "CENTER", 0, COIN_REST)
+    W.coinEdge = W.cf:CreateTexture(nil, "ARTWORK", nil, 1)
+    W.coinEdge:SetTexture(ns.media .. "coin_edge.png")
+    W.coin = W.cf:CreateTexture(nil, "ARTWORK", nil, 2)
+    drawCoin(0, COIN_REST, 1)
     W.cfInfo = font(W.cf, MORPHEUS, 30, "OUTLINE", GOLD)
     W.cfInfo:SetPoint("CENTER", c, "CENTER", 0, -80)
     W.heads = font(W.cf, MORPHEUS, 26, "OUTLINE", GOLD)
@@ -941,19 +1009,31 @@ local function flipCoin(ev, t)
     W.flipping = true
     ns.sound("chipLay1")
     W.cfInfo:SetText("")
-    tween(1.5, function(p)
-        W.coin:SetWidth(math.max(2, 140 * math.abs(math.cos(p * math.pi * 7))))
-        W.coin:SetPoint("CENTER", W.content, "CENTER", 0, 30 + math.sin(p * math.pi) * 140)
+    -- toss: a parabola up and down while it turns over 7 times and slows, ending on the winning face
+    local turns = 2 * math.pi * 7 + (ev.winner == 1 and 0 or math.pi)
+    local wobble = (math.random() - .5) * .5
+    tween(1.9, function(p)
+        local arc = 4 * p * (1 - p)
+        local spin = 1 - (1 - p) ^ 2
+        drawCoin(turns * spin, COIN_REST + 250 * arc, 1 + .3 * arc, wobble * arc)
     end, function()
-        W.flipping = false
-        W.coin:SetWidth(140)
-        ns.sound("chipsStack2")
-        local side = ev.winner == 1 and "HEADS" or "TAILS"
-        W.cfInfo:SetText(side .. "  -  " .. nm(t.seats[ev.winner]) .. " wins")
-        stinger(side, nm(t.seats[ev.winner]) .. " wins " .. money(t, t.wager), 1.6, GOLD)
-        local w, l = seats[ev.winner], seats[3 - ev.winner]
-        if w then w:Anim("cheer", 4); C_Timer.After(1, function() coinShower(w.ox, w.oy + 60, 50) end) end
-        if l then l:Anim("cry", 4) end
+        ns.sound("chipLay1")
+        -- one small bounce, rocking on the edge, then it settles
+        tween(.35, function(q)
+            local hop = math.sin(q * math.pi)
+            drawCoin(turns + .5 * hop * (1 - q), COIN_REST + 16 * hop, 1)
+        end, function()
+            drawCoin(turns, COIN_REST, 1)
+            tween(.7, function(q) W.coinFlash:SetVertexColor(1, .8, .3, .9 * (1 - q)) end)
+            ns.sound("chipsStack2")
+            W.flipping = false
+            local side = ev.winner == 1 and "HEADS" or "TAILS"
+            W.cfInfo:SetText(side .. "  -  " .. nm(t.seats[ev.winner]) .. " wins")
+            stinger(side, nm(t.seats[ev.winner]) .. " wins " .. money(t, t.wager), 1.6, GOLD)
+            local w, l = seats[ev.winner], seats[3 - ev.winner]
+            if w then w:Anim("cheer", 4); C_Timer.After(1, function() coinShower(w.ox, w.oy + 60, 50) end) end
+            if l then l:Anim("cry", 4) end
+        end)
     end)
 end
 
@@ -1038,19 +1118,18 @@ local function showSettled(t, debts)
         local c = ns.Table.current()
         if not (c and c.t.phase == "done" and c.t.round == round) then return end
         local p = W.settle
-        local n = math.min(#debts, SETTLE_ROWS)
-        for i, r in ipairs(p.rows) do
-            local d = debts[i]
-            if i == n and #debts > n then
-                r.who:SetText(("and %d more"):format(#debts - n + 1)); r.amt:SetText("")
-            elseif i <= n then
-                r.who:SetText(nm(d.from) .. "  >  " .. nm(d.to)); r.amt:SetText(ns.coins(d.amount))
-            else
-                r.who:SetText(""); r.amt:SetText("")
-            end
+        p.count = #debts
+        for i, d in ipairs(debts) do
+            local r = settleRow(i)
+            r.who:SetText(nm(d.from) .. "  >  " .. nm(d.to)); r.amt:SetText(ns.coins(d.amount))
+            r.who:Show(); r.amt:Show()
         end
-        p.foot:SetText(t.chips and "Chips only: no gold changes hands." or "Trade it; the ledger marks it paid.")
-        p:SetHeight(34 + n * 18 + 26)
+        for i = #debts + 1, #p.rows do p.rows[i].who:Hide(); p.rows[i].amt:Hide() end
+        p.list:SetHeight(#debts * ROW_H)
+        p.sf:SetVerticalScroll(0)
+        p.foot:SetText((t.chips and "Chips only: no gold changes hands." or "Trade it; the ledger marks it paid.")
+            .. (#debts > SETTLE_ROWS and "  Scroll for more." or ""))
+        layoutSettle()
         p:Show()
     end)
 end

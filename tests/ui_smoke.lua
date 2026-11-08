@@ -171,6 +171,7 @@ end
 math.randomseed(7)
 print("UI smoke")
 play("test 1 deathroll", function() if ns.Table.myTurn() then ns.Table.rollMine() end end)
+play("test 5 deathroll", function() if ns.Table.myTurn() then ns.Table.rollMine() end end)   -- 5 payments: Settle Up scrolls
 play("test 9 highlow", function() if ns.Table.myTurn() then ns.Table.rollMine() end end)
 play("test 1 coinflip", function() end)
 play("test 3 blackjack", function()

@@ -8,6 +8,9 @@ Backlog from playtests. Highest priority first.
 
 ## Done
 
+- **B8 Coinflip looked flat.** It was an item icon squashed sideways. Now a drawn two-sided coin (crown heads, skull tails, reeded edge from `scripts/make-coin-art.py`) tossed in an arc, flipping end over end and slowing, with a shadow on the felt, one bounce and a gold flash on landing. Requested in chat 2026-11-08.
+- **B7 Settle Up card folds and scrolls.** Fold button in its header (remembered in `settings.settleFolded`; folded shows the payment count); more than 4 payments scroll with the mouse wheel. Requested in chat 2026-11-08.
+
 - **B6 Payouts hidden behind the bottom seat's nameplate.** "X pays Y" ran along the status line under the bottom seat. It is now a parchment "Settle Up" card in the empty top-left corner (up to 4 rows, then "and N more"), shown after the round's stinger and hidden when the next round starts. Deathroll's corner seats moved slightly lower to clear it. Reported in chat 2026-11-08 with a Hold'em screenshot.
 
 - **B5 Renamed the addon to GambleForever.** At least six CurseForge addons are called DeathRoll-something, and DeathRoll Enhancer and Deathroll Companion also take `/dr` and `/deathroll`. Now `/gf` and `/gamble`, folder and prefix `GambleForever`, saved data `GambleForeverDB` (the old `DeathrollDB` ledger is not carried over). The Deathroll game keeps its name. The repo folder is still `deathroll`. [playtest 1](feedback/2026-11-08-playtest-1.md)
