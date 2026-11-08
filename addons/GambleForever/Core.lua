@@ -254,6 +254,7 @@ f:SetScript("OnEvent", function(_, ev, ...)
         if db.settings.music == nil then db.settings.music = true end
         if db.settings.immersive == nil then db.settings.immersive = true end
         db.settings.window = db.settings.window or {}
+        if db.settings.chatPlay == nil then db.settings.chatPlay = true end
         C_ChatInfo.RegisterAddonMessagePrefix(PREFIX)
         ns.Stage.restoreLeftovers()
     elseif ev == "PLAYER_LOGIN" then

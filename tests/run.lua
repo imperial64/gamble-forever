@@ -622,6 +622,15 @@ test("Hold'em by chat: hole cards by whisper, prompts with amounts, raise in gol
     check(t.phase == "done" and P.saidLike("^%[GF%] Efe wins 20g, everyone else folded%.$"), "the result is narrated")
 end)
 
+test("chat on with only addon players: the game is posted, nobody is prompted", function()
+    local P, host = chatTable({ "Efe Imperial", "Talmika Waystalker", "Bob Noaddon" }, { game = "deathroll", wager = 10000, start = 1000, maxSeats = 3, stamp = 25 })
+    local tal = P.clients["Talmika Waystalker"]
+    host.Table.startGame(); P.flush(); P.serverRoll(2)   -- Talmika first
+    check(P.saidLike("^%[GF%] Deathroll from 1000") and not P.saidLike("/roll 1%-"), "start posted, no prompt for an addon player")
+    tal.Table.rollMine(); P.serverRoll(1)
+    check(P.saidLike("^%[GF%] Efe wins%. Talmika pays Efe 1g%.$"), "result posted")
+end)
+
 test("without chat play, chat lines do nothing", function()
     local P, host = seated({ "Efe Imperial", "Talmika Waystalker" }, { game = "deathroll", wager = 100, start = 1000, maxSeats = 3, stamp = 24 })
     host.say = function() error("narrated without chat play") end

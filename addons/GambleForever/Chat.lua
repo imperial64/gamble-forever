@@ -228,8 +228,8 @@ local function say(text, key)
     for _, l in ipairs(lines) do ns.say(l, #lines == 1 and key or nil) end
 end
 
--- Called by the host after every change. Seating is always announced so chat players can find
--- the table; the game itself is narrated only while a chat player sits at it.
+-- Called by the host after every change: the group can follow the table and join in. Prompts
+-- and hole cards go only to chat players; addon players have the table view.
 function Chat.hostChanged(c, ev)
     local t = c.t
     if not c.saidOpen then
@@ -240,9 +240,6 @@ function Chat.hostChanged(c, ev)
         if c.saidSeats ~= #t.seats then c.saidSeats = #t.seats; say(Chat.seatsLine(t), "seats") end
         return
     end
-    local any = false
-    for _, n in ipairs(t.seats) do if c.chatters[n] then any = true end end
-    if not any then return end
     if c.saidStart ~= t.round then
         c.saidStart = t.round
         local l = startLine(t)
