@@ -1336,7 +1336,7 @@ local function buildLobby()
 
     local title = font(lobby, MORPHEUS, 26, "OUTLINE", GOLD)
     title:SetPoint("TOP", 0, -14)
-    title:SetText("The Forever Tavern")
+    title:SetText("GambleForever")
     local close = skinButton(lobby, "X", 28, 26, "dark", function() lobby:Hide() end, 14)
     close:SetPoint("TOPRIGHT", -16, -12)
 
