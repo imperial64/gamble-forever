@@ -933,7 +933,8 @@ local function refreshPoker(c, t)
             local left = t.cap - (t.total[s] or 0)
             local note = t.inHand[s] and (t.allin[s] and "ALL IN" or ("stack " .. ns.coins(left))) or "folded"
             local bet = (t.bet[s] or 0) > 0 and ("bet " .. ns.coins(t.bet[s])) or ""
-            label(("n%d"):format(s), note, ax, ay - 46, 11)
+            -- the bottom seat's character stands right below its cards: its note goes to their left
+            if s == 1 then label("n1", note, ax - 120, ay, 11) else label(("n%d"):format(s), note, ax, ay - 46, 11) end
             if bet ~= "" then label(("bt%d"):format(s), bet, ax, ay + 44, 12, GOLD) end
             if t.phase == "done" and t.won and (t.won[s] or 0) > 0 then
                 local hn = t.scores and t.scores[s] and ns.Cards.handName(t.scores[s]) or ""
