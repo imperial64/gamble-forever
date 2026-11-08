@@ -100,7 +100,6 @@ function GetTime() return os.clock() end
 function time() return os.time() end
 function RandomRoll(lo, hi) rolls[#rolls + 1] = { lo, hi } end
 function CreateColor(r, g, b, a) return { r, g, b, a } end
-function GetCoinTextureString(c) return tostring(c) .. "c" end
 function strsplit(sep, s) local out = {}; for p in (s .. sep):gmatch("(.-)" .. sep:gsub("%p", "%%%0")) do out[#out + 1] = p end; return unpack(out) end
 function tinsert(t, v) table.insert(t, v) end
 function wipe(t) for k in pairs(t) do t[k] = nil end; return t end
@@ -149,6 +148,7 @@ local function serverRolls()
     end
 end
 
+assert(ns.coins(2550):match("^25|T.-SilverIcon.-|t 50|T.-CopperIcon.-|t$"), "coins: " .. ns.coins(2550))   -- Forever has no GetCoinTextureString
 fire("ADDON_LOADED", "GambleForever")
 fire("PLAYER_LOGIN")
 tick()

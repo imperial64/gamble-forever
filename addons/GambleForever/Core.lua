@@ -16,11 +16,17 @@ function ns.seed()
 end
 ns.media = "Interface\\AddOns\\GambleForever\\media\\"
 
--- Amounts are copper everywhere (wagers, ledger, trades). Shown with the game's coin icons.
+-- Amounts are copper everywhere (wagers, ledger, trades). Shown as number + coin icon, built
+-- here because Forever has no GetCoinTextureString ("25s 50c" in Morpheus read as "258 50c").
+local COIN = "|TInterface\\MoneyFrame\\UI-%sIcon:0:0:2:0|t"
 function ns.coins(copper)
     copper = math.floor(copper or 0)
-    if GetCoinTextureString then return GetCoinTextureString(copper) end
-    return ns.Chat.money(copper)
+    local g, s, c = math.floor(copper / 10000), math.floor(copper / 100) % 100, copper % 100
+    local out = {}
+    if g > 0 then out[#out + 1] = g .. COIN:format("Gold") end
+    if s > 0 then out[#out + 1] = s .. COIN:format("Silver") end
+    if c > 0 or #out == 0 then out[#out + 1] = c .. COIN:format("Copper") end
+    return table.concat(out, " ")
 end
 
 function ns.sound(name)
