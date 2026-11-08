@@ -1,0 +1,463 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Deathroll mockup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;800&family=Cinzel+Decorative:wght@900&family=EB+Garamond:wght@500;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --gold:#ffd100; --gold2:#c9a227; --gold3:#8a6a12;
+  --wood:#5a3820; --wood-dk:#2a180c; --parch:#e9d7a8; --ink:#2b1a0b;
+  --red:#a3150f; --red-dk:#5c0907; --felt:#145c39;
+  --pal:#f58cba; --war:#c69b6d; --mag:#3fc7eb; --rog:#fff468; --pri:#ffffff; --hun:#aad372; --wlk:#8788ee; --dru:#ff7c0a; --sha:#0070dd;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;overflow:hidden;background:#070403;color:#f3e6c4;font-family:'EB Garamond',serif}
+
+/* The world behind the table: an out-of-focus tavern */
+#world{position:fixed;inset:-40px;filter:blur(6px) saturate(1.1);
+  background:
+    radial-gradient(circle at 12% 30%, rgba(255,170,60,.55), transparent 9%),
+    radial-gradient(circle at 88% 26%, rgba(255,160,50,.5), transparent 8%),
+    radial-gradient(circle at 70% 75%, rgba(255,140,40,.25), transparent 14%),
+    radial-gradient(circle at 25% 85%, rgba(255,150,60,.2), transparent 16%),
+    repeating-linear-gradient(90deg, #26150b 0 120px, #1d1008 120px 124px, #2c190d 124px 250px, #1a0e07 250px 254px),
+    #1a0e07;}
+#world::after{content:"";position:absolute;inset:0;
+  background:repeating-linear-gradient(0deg, transparent 0 260px, rgba(0,0,0,.55) 260px 300px);}
+#vignette{position:fixed;inset:0;pointer-events:none;z-index:5;
+  background:radial-gradient(ellipse at 50% 45%, transparent 45%, rgba(0,0,0,.55) 75%, rgba(0,0,0,.92) 100%)}
+
+/* 16:9 stage; 1em = 1% of stage width */
+#stage{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:3}
+#stage.shake1{animation:shake .18s infinite}
+#stage.shake2{animation:shake2 .12s infinite}
+@keyframes shake{0%{transform:translate(-50%,-50%)}25%{transform:translate(calc(-50% + 2px),calc(-50% - 1px))}50%{transform:translate(calc(-50% - 2px),calc(-50% + 2px))}75%{transform:translate(calc(-50% + 1px),calc(-50% + 1px))}}
+@keyframes shake2{0%{transform:translate(-50%,-50%) rotate(0)}25%{transform:translate(calc(-50% + 6px),calc(-50% - 4px)) rotate(.3deg)}50%{transform:translate(calc(-50% - 5px),calc(-50% + 5px)) rotate(-.3deg)}75%{transform:translate(calc(-50% + 3px),calc(-50% + 2px))}}
+
+.scene{position:absolute;inset:0;opacity:0;pointer-events:none;transition:opacity .6s}
+.scene.on{opacity:1;pointer-events:auto}
+
+/* Mockup-only navigation */
+#nav{position:fixed;top:10px;left:50%;transform:translateX(-50%);z-index:20;display:flex;gap:6px;
+  background:rgba(0,0,0,.6);padding:5px;border-radius:20px;border:1px solid #6b5420;font:600 13px Cinzel,serif}
+#nav button{background:none;border:0;color:#cdb67a;padding:5px 12px;border-radius:14px;cursor:pointer;font:inherit}
+#nav button.on{background:linear-gradient(#b8860b,#6e4d05);color:#fff4c9}
+#nav .tag{color:#7d6a3e;padding:5px 8px;font-size:11px;align-self:center}
+
+/* Blizzard-ish frame pieces */
+.plaque{position:absolute;left:50%;transform:translateX(-50%);top:1.2em;padding:.35em 2.2em;
+  font:800 1.25em Cinzel,serif;color:var(--gold);letter-spacing:.06em;text-shadow:0 2px 0 #000;
+  background:linear-gradient(#3a2412,#1d1007);border:2px solid var(--gold2);border-radius:.4em;
+  box-shadow:0 0 0 2px #000, 0 .5em 1.5em rgba(0,0,0,.7), inset 0 0 1em rgba(255,200,80,.15);white-space:nowrap}
+.plaque small{display:block;text-align:center;font:600 .55em Cinzel,serif;color:#e6cf8f;letter-spacing:.12em}
+.btn{font:800 1em Cinzel,serif;color:#ffe9a8;letter-spacing:.06em;cursor:pointer;padding:.5em 1.4em;
+  background:linear-gradient(#c3271d,#7a0f0a 55%,#4a0705);border:2px solid var(--gold2);border-radius:.35em;
+  box-shadow:0 0 0 2px #000, inset 0 1px 0 rgba(255,255,255,.3), 0 .3em .8em rgba(0,0,0,.6);text-shadow:0 1px 0 #000}
+.btn:hover{filter:brightness(1.2)}
+.btn.big{font-size:1.5em;padding:.45em 2em}
+.btn.dim{filter:grayscale(.8) brightness(.6);cursor:default}
+.btn.gold{background:linear-gradient(#e2b33a,#9a6b08 55%,#5e3f02);color:#2b1a05;text-shadow:0 1px 0 rgba(255,255,255,.4)}
+
+/* The table */
+.table{position:absolute;left:12%;top:11%;width:76%;height:62%;border-radius:50%;
+  background:
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence baseFrequency='.9' numOctaves='2'/><feColorMatrix values='0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 .22 0'/></filter><rect width='200' height='200' filter='url(%23n)'/></svg>"),
+    radial-gradient(ellipse at 50% 40%, #23885a 0%, #146b44 40%, #0b4329 78%, #062616 100%);
+  box-shadow: inset 0 0 6em rgba(0,0,0,.65), 0 0 0 .3em #120904, 0 0 0 1.7em #5a3820, 0 0 0 1.9em #3a2312,
+    0 0 0 2.1em var(--gold2), 0 0 0 2.4em #1a0e07, 0 3em 6em rgba(0,0,0,.85);}
+.table::before{content:"";position:absolute;inset:-1.7em;border-radius:50%;pointer-events:none;
+  background:repeating-conic-gradient(from 0deg, rgba(255,255,255,.04) 0 2deg, transparent 2deg 5deg);
+  -webkit-mask:radial-gradient(ellipse, transparent 65%, #000 66%);mask:radial-gradient(ellipse, transparent 65%, #000 66%)}
+.felt-print{position:absolute;left:0;right:0;text-align:center;font-family:Cinzel,serif;color:rgba(255,214,90,.22);letter-spacing:.15em;pointer-events:none}
+
+/* Seats with a placeholder for the 3D ModelScene actor */
+.seat{position:absolute;width:10em;transform:translate(-50%,-50%);text-align:center;transition:filter .8s, transform .8s, opacity .8s}
+.actor{width:7em;height:7em;margin:0 auto;border-radius:50%;position:relative;
+  background:radial-gradient(circle at 50% 30%, rgba(255,220,150,.25), rgba(0,0,0,.0) 60%), radial-gradient(circle, #2a1a10, #0c0705 70%);
+  border:.18em solid var(--cls, #888);box-shadow:0 0 0 .2em #000, 0 0 1.5em rgba(0,0,0,.8)}
+.actor svg{position:absolute;inset:8% 10% 0 10%;width:80%;height:92%}
+.actor .tag3d{position:absolute;bottom:-.2em;left:50%;transform:translateX(-50%);font:600 .55em Cinzel,serif;color:#9b8a62;
+  background:#0b0705;padding:0 .5em;border-radius:.4em;white-space:nowrap;letter-spacing:.08em}
+.plate{margin-top:.45em;padding:.2em .6em;background:linear-gradient(#2c1a0d,#140b05);border:1px solid #6b5420;border-radius:.35em;box-shadow:0 0 0 1px #000}
+.plate .nm{font:800 .95em Cinzel,serif;color:var(--cls,#ddd);text-shadow:0 1px 0 #000}
+.plate .gl{font:700 .85em 'EB Garamond',serif;color:var(--gold)}
+.seat.turn .actor{animation:turnglow 1.1s ease-in-out infinite}
+@keyframes turnglow{50%{box-shadow:0 0 0 .2em #000, 0 0 2.2em .4em rgba(255,209,0,.75)}}
+.seat.dead{filter:grayscale(1) brightness(.45);transform:translate(-50%,-38%) rotate(-8deg)}
+.seat.win .actor{animation:winpulse .7s ease-in-out infinite}
+@keyframes winpulse{50%{box-shadow:0 0 0 .2em #000, 0 0 3em .8em rgba(255,209,0,.9)}}
+.emote{position:absolute;left:50%;top:-1.6em;transform:translateX(-50%);font:700 .9em 'EB Garamond';color:#fff;
+  background:rgba(0,0,0,.75);border:1px solid #6b5420;padding:.1em .6em;border-radius:.6em;white-space:nowrap;opacity:0;transition:opacity .3s}
+.emote.on{opacity:1}
+
+/* Bottom action bar and side tabs */
+.bar{position:absolute;left:18%;right:18%;bottom:2.2%;height:9%;display:flex;align-items:center;justify-content:center;gap:1.2em;
+  background:linear-gradient(#3b2413,#1c0f06);border:2px solid var(--gold2);border-radius:.6em;box-shadow:0 0 0 2px #000, 0 .6em 1.6em rgba(0,0,0,.8)}
+.bar .info{font:700 1em Cinzel,serif;color:#e6cf8f}
+.bar .info b{color:var(--gold)}
+.iconbtn{width:2.6em;height:2.6em;border-radius:50%;display:grid;place-items:center;cursor:pointer;font-size:1em;
+  background:radial-gradient(#4a2d16,#1a0e06);border:2px solid var(--gold2);box-shadow:0 0 0 2px #000;color:#e6cf8f}
+.leave{position:absolute;left:1.5%;top:2.5%;font-size:.8em}
+.tabs{position:absolute;right:0;top:24%;display:flex;flex-direction:column;gap:.4em}
+.tabs div{writing-mode:vertical-rl;font:800 .8em Cinzel,serif;color:#e6cf8f;padding:1em .45em;cursor:pointer;
+  background:linear-gradient(90deg,#3b2413,#1c0f06);border:2px solid var(--gold2);border-right:0;border-radius:.5em 0 0 .5em}
+.tabs div.on{color:var(--gold);background:linear-gradient(90deg,#5a3820,#2a180c)}
+.side{position:absolute;right:2.2%;top:22%;width:17%;padding:.8em 1em;color:var(--ink);font-size:.85em;
+  background:linear-gradient(#efe0b5,#d9c18a);border:2px solid #7a5a1c;border-radius:.4em;box-shadow:0 0 0 2px #000, 0 .8em 2em rgba(0,0,0,.8)}
+.side h4{margin:0 0 .4em;font:800 1.05em Cinzel,serif;color:#5a1a08;border-bottom:1px solid #9b7b3a}
+.side .row{display:flex;justify-content:space-between;padding:.12em 0;border-bottom:1px dotted #b39a5e}
+.side .row b{color:#7a1206}
+.side .row.ok b{color:#1c6a1a}
+
+/* Deathroll set piece */
+#bignum{position:absolute;left:50%;top:38%;transform:translate(-50%,-50%);font:900 13em 'Cinzel Decorative',serif;line-height:1;
+  background:linear-gradient(#fff6c8,#ffd100 45%,#b07800 75%,#5e3a00);-webkit-background-clip:text;background-clip:text;color:transparent;
+  filter:drop-shadow(0 .04em 0 #000) drop-shadow(0 0 .12em rgba(255,190,40,.55));transition:transform .25s}
+#bignum.hit{transform:translate(-50%,-50%) scale(1.12)}
+#bignum.danger{background:linear-gradient(#ffd0c0,#ff5a3c 45%,#a3150f 75%,#3c0302);-webkit-background-clip:text;background-clip:text;
+  filter:drop-shadow(0 .04em 0 #000) drop-shadow(0 0 .2em rgba(255,40,20,.8))}
+#range{position:absolute;left:50%;top:57%;transform:translateX(-50%);font:800 1.4em Cinzel,serif;color:#f1dfa6;text-shadow:0 2px 0 #000}
+#turnlbl{position:absolute;left:50%;top:18%;transform:translateX(-50%);font:800 1.1em Cinzel,serif;color:var(--gold);letter-spacing:.2em;text-shadow:0 2px 0 #000}
+#trail{position:absolute;left:50%;top:64%;transform:translateX(-50%);display:flex;gap:.4em;align-items:center;font:700 1em 'EB Garamond';color:#d9c79a}
+#trail span{padding:.05em .5em;border-radius:.6em;background:rgba(0,0,0,.35);border:1px solid rgba(255,214,90,.3)}
+#trail i{color:#8d7a4a;font-style:normal}
+#dice{position:absolute;left:50%;top:38%;width:4em;transform:translate(-50%,-50%);opacity:0;pointer-events:none}
+#stinger{position:absolute;inset:0;display:grid;place-items:center;pointer-events:none;opacity:0;z-index:8}
+#stinger div{font:900 9em 'Cinzel Decorative',serif;color:#ff2a14;letter-spacing:.04em;
+  text-shadow:0 0 .1em #000, 0 0 .4em rgba(255,0,0,.8), 0 .05em 0 #3c0302;transform:scale(2.5);transition:transform 1.4s cubic-bezier(.2,.9,.2,1)}
+#stinger.on{opacity:1;background:radial-gradient(ellipse, rgba(80,0,0,.55), rgba(0,0,0,.75))}
+#stinger.on div{transform:scale(1)}
+#stinger p{position:absolute;top:62%;font:800 1.8em Cinzel,serif;color:var(--gold);text-shadow:0 2px 0 #000}
+
+/* Coins (gold, silver, copper) */
+.coin{position:absolute;width:1.6em;height:1.6em;border-radius:50%;pointer-events:none;z-index:9;
+  background:radial-gradient(circle at 35% 30%, #fff7c2, #ffd100 40%, #a87400 80%);box-shadow:inset 0 0 0 .12em #8a5a00, 0 .1em .2em rgba(0,0,0,.6)}
+
+/* Cards */
+.card{position:absolute;width:4.6em;height:6.4em;transform-style:preserve-3d;transition:left .5s cubic-bezier(.2,.8,.2,1), top .5s cubic-bezier(.2,.8,.2,1), transform .45s;z-index:4}
+.card img{position:absolute;inset:0;width:100%;height:100%;backface-visibility:hidden;image-rendering:pixelated;filter:drop-shadow(0 .2em .25em rgba(0,0,0,.6))}
+.card img.back{transform:rotateY(180deg)}
+.card.down{transform:rotateY(180deg)}
+.total{position:absolute;font:800 .95em Cinzel,serif;color:#fff;background:rgba(0,0,0,.7);border:1px solid var(--gold2);border-radius:.6em;padding:0 .5em;transform:translateX(-50%);opacity:0;transition:opacity .3s;z-index:6}
+.total.on{opacity:1}
+.betring{position:absolute;width:4.4em;height:4.4em;border-radius:50%;border:.16em solid rgba(255,214,90,.55);transform:translate(-50%,-50%);
+  box-shadow:inset 0 0 1em rgba(0,0,0,.4)}
+.betring img{position:absolute;width:2.6em;left:50%;transform:translateX(-50%)}
+.float{position:absolute;font:900 1.6em Cinzel,serif;transform:translate(-50%,0);transition:transform 1.6s ease-out, opacity 1.6s;z-index:7;text-shadow:0 2px 0 #000}
+#shoe{position:absolute;left:72%;top:15%;width:7em;height:5.6em;border-radius:.4em;
+  background:linear-gradient(#3b2413,#1a0e06);border:2px solid var(--gold2);box-shadow:0 0 0 2px #000, 0 .5em 1em rgba(0,0,0,.7)}
+#shoe img{position:absolute;width:4em;left:1.4em;top:-.8em;transform:rotate(-8deg)}
+#shoe span{position:absolute;bottom:.2em;left:0;right:0;text-align:center;font:700 .7em Cinzel,serif;color:#e6cf8f}
+#rolltoast{position:absolute;left:2%;bottom:14%;width:22%;font:600 .9em 'EB Garamond';color:#ffff00;text-shadow:0 1px 0 #000}
+#rolltoast div{opacity:0;animation:toast 4s forwards}
+#rolltoast div i{color:#9be09b;font-style:normal}
+@keyframes toast{8%{opacity:1}80%{opacity:1}100%{opacity:0}}
+
+/* High-Low roll board */
+#board{position:absolute;left:25%;right:25%;top:31%;display:grid;grid-template-columns:repeat(4,1fr);gap:.25em .5em}
+#board div{display:flex;justify-content:space-between;font:600 .8em 'EB Garamond';padding:.05em .45em;border-radius:.3em;
+  background:rgba(0,0,0,.35);border:1px solid rgba(255,214,90,.18);color:#e8dcb8}
+#board div b{color:#fff}
+#board div.hi{background:rgba(255,200,0,.35);border-color:var(--gold)}
+#board div.lo{background:rgba(200,20,10,.45);border-color:#ff5a3c}
+#hlres{position:absolute;left:50%;top:19%;transform:translateX(-50%);font:800 1.15em Cinzel,serif;color:#f1dfa6;text-shadow:0 2px 0 #000;white-space:nowrap}
+#hlres b{color:var(--gold)} #hlres em{color:#ff6a4a;font-style:normal}
+
+/* Lobby */
+.parch{position:absolute;color:var(--ink);background:
+  radial-gradient(ellipse at 50% 0%, rgba(255,255,255,.35), transparent 60%), linear-gradient(#f0e2ba,#d8c08a);
+  border:3px solid #6b4a14;border-radius:.5em;box-shadow:0 0 0 3px #000, inset 0 0 3em rgba(120,80,20,.35), 0 1.5em 4em rgba(0,0,0,.9)}
+.parch h2{margin:0;font:900 2em 'Cinzel Decorative',serif;color:#5a1206;text-align:center;letter-spacing:.04em}
+.parch h3{margin:.2em 0 .5em;font:800 1em Cinzel,serif;color:#6b3a0a;text-align:center;letter-spacing:.2em}
+.tables{width:100%;border-collapse:collapse;font-size:1em}
+.tables th{font:800 .75em Cinzel,serif;color:#6b3a0a;text-align:left;border-bottom:2px solid #8a6a2a;padding:.3em}
+.tables td{padding:.45em .3em;border-bottom:1px solid #b89d62;font-weight:700}
+.tables td.g{font:800 .95em Cinzel,serif;color:#3d1505}
+.tables .ico{display:inline-grid;place-items:center;width:1.8em;height:1.8em;border-radius:50%;background:#2a180c;border:1px solid #8a6a2a;margin-right:.4em;vertical-align:middle}
+.tables .ico img{width:1.2em}
+.mini{font-size:.75em;padding:.3em .9em}
+.form label{display:block;font:800 .75em Cinzel,serif;color:#6b3a0a;margin:.7em 0 .25em;letter-spacing:.1em}
+.games{display:grid;grid-template-columns:1fr 1fr;gap:.4em}
+.games div{padding:.45em;border:2px solid #8a6a2a;border-radius:.35em;text-align:center;font:800 .85em Cinzel,serif;background:rgba(255,255,255,.25);cursor:pointer}
+.games div.on{background:#5a1206;color:#ffd96a;border-color:#2b0702}
+.inp{width:100%;padding:.35em .5em;font:700 1em 'EB Garamond';border:2px solid #8a6a2a;border-radius:.3em;background:#fbf3dc;color:var(--ink)}
+.chk{display:flex;align-items:center;gap:.4em;font-weight:700;margin-top:.6em}
+.ledgerbar{position:absolute;left:12%;right:12%;bottom:4%;padding:.6em 1.2em;display:flex;gap:2em;align-items:center;justify-content:center;
+  background:linear-gradient(#3b2413,#1c0f06);border:2px solid var(--gold2);border-radius:.5em;box-shadow:0 0 0 2px #000;font:700 1em 'EB Garamond'}
+.ledgerbar b{color:var(--gold)} .ledgerbar em{color:#ff8a6a;font-style:normal}
+.ledgerbar .h{font:800 .85em Cinzel,serif;color:#e6cf8f;letter-spacing:.12em}
+#soundhint{position:fixed;bottom:10px;right:14px;z-index:20;font:600 12px Cinzel,serif;color:#9b8a62}
+</style>
+</head>
+<body>
+<div id="world"></div>
+<div id="vignette"></div>
+<div id="nav">
+  <span class="tag">MOCKUP</span>
+  <button data-s="lobby" class="on">Lobby</button>
+  <button data-s="deathroll">Deathroll</button>
+  <button data-s="highlow">High-Low</button>
+  <button data-s="blackjack">Blackjack</button>
+</div>
+<div id="soundhint">click anywhere to enable sound</div>
+
+<div id="stage">
+
+  <!-- ============ LOBBY ============ -->
+  <section class="scene on" id="lobby">
+    <div class="parch" style="left:8%;top:8%;width:55%;height:72%;padding:1.4em 1.8em">
+      <h2>The Deathroll Tavern</h2>
+      <h3>OPEN TABLES IN YOUR GROUP &amp; GUILD</h3>
+      <table class="tables">
+        <tr><th>Game</th><th>Host</th><th>Stakes</th><th>Seats</th><th></th></tr>
+        <tr><td class="g"><span class="ico"><img src="assets/dice/dieRed_border1.png"></span>Deathroll · 1v1</td><td>Thoradin</td><td>500g</td><td>1 / 2</td><td><button class="btn mini">Take Seat</button></td></tr>
+        <tr><td class="g"><span class="ico"><img src="assets/dice/dieWhite_border6.png"></span>High-Low</td><td>Mira</td><td>1 – 1,000g</td><td>23 / 40</td><td><button class="btn mini">Take Seat</button></td></tr>
+        <tr><td class="g"><span class="ico"><img src="assets/cards/card_spades_A.png"></span>Blackjack</td><td>Grizzlenut</td><td>50 – 2,000g</td><td>3 / 5</td><td><button class="btn mini">Take Seat</button></td></tr>
+        <tr><td class="g"><span class="ico"><img src="assets/chips/chipWhite_border.png"></span>Coinflip</td><td>Brightwhisk</td><td>250g</td><td>2 / 2</td><td><button class="btn mini dim">Watch</button></td></tr>
+        <tr><td class="g"><span class="ico"><img src="assets/dice/dieRed_border3.png"></span>Deathroll · FFA</td><td>Kaelra</td><td>5,000g</td><td>4 / 6</td><td><button class="btn mini">Take Seat</button></td></tr>
+      </table>
+    </div>
+    <div class="parch form" style="left:66%;top:8%;width:26%;height:72%;padding:1.2em 1.4em">
+      <h3 style="margin-top:0">OPEN A TABLE</h3>
+      <label>GAME</label>
+      <div class="games"><div class="on">Deathroll</div><div>High-Low</div><div>Coinflip</div><div>Blackjack</div></div>
+      <label>WAGER (GOLD)</label><input class="inp" value="500">
+      <label>SEATS</label><input class="inp" value="2">
+      <div class="chk"><input type="checkbox"> Chips only (no gold)</div>
+      <div style="text-align:center;margin-top:1.2em"><button class="btn gold">Open Table</button></div>
+    </div>
+    <div class="ledgerbar">
+      <span class="h">SESSION LEDGER</span>
+      <span>Thoradin → you <b>1,240g</b></span>
+      <span>You → Mira <em>300g</em></span>
+      <span style="color:#9b8a62">Open a trade and the amount is shown for you</span>
+    </div>
+  </section>
+
+  <!-- ============ DEATHROLL ============ -->
+  <section class="scene" id="deathroll">
+    <div class="table">
+      <div class="felt-print" style="bottom:5%;font-size:.95em">ROLL A ONE AND YOU PAY</div>
+    </div>
+    <div id="turnlbl">THORADIN'S ROLL</div>
+    <div id="bignum">5000</div>
+    <img id="dice" src="assets/dice/dieWhite_border6.png">
+    <div id="range">/roll 1 – 5000</div>
+    <div id="trail"></div>
+    <div class="seat" id="dr0" style="left:12%;top:44%;--cls:var(--pal)"><div class="emote"></div><div class="actor"></div><div class="plate"><div class="nm">Efe</div><div class="gl">You · 12,480g</div></div></div>
+    <div class="seat" id="dr1" style="left:88%;top:44%;--cls:var(--war)"><div class="emote"></div><div class="actor"></div><div class="plate"><div class="nm">Thoradin</div><div class="gl">8,915g</div></div></div>
+    <div class="plaque">DEATHROLL<small>1v1 · WAGER 500g</small></div>
+    <button class="btn leave">Leave Table</button>
+    <div class="bar">
+      <div class="iconbtn" title="Quick chat"><svg viewBox="0 0 24 24" width="1.3em" height="1.3em" fill="currentColor"><path d="M4 4h16v11H9l-5 4z"/></svg></div>
+      <div class="info">Pot <b>500g</b></div>
+      <button class="btn big" id="rollbtn">ROLL</button>
+      <div class="info">Start <b>5000</b></div>
+      <div class="iconbtn" title="Mute"><svg viewBox="0 0 24 24" width="1.3em" height="1.3em" fill="currentColor"><path d="M4 9h4l5-4v14l-5-4H4z"/><path d="M16 8c2 2 2 6 0 8" stroke="currentColor" stroke-width="2" fill="none"/></svg></div>
+    </div>
+    <div id="stinger"><div>DEATHROLL</div><p></p></div>
+  </section>
+
+  <!-- ============ HIGH-LOW ============ -->
+  <section class="scene" id="highlow">
+    <div class="table">
+      <div class="felt-print" style="top:6%;font-size:1.4em">HIGH · LOW</div>
+      <div class="felt-print" style="bottom:7%;font-size:.9em">LOWEST PAYS HIGHEST THE DIFFERENCE</div>
+    </div>
+    <div id="hlres">Everyone: /roll 1 – 1000</div>
+    <div id="board"></div>
+    <div id="hlseats"></div>
+    <div class="plaque">HIGH-LOW<small>40 SEATS · 1 – 1,000g</small></div>
+    <button class="btn leave">Leave Table</button>
+    <div class="bar">
+      <div class="iconbtn"><svg viewBox="0 0 24 24" width="1.3em" height="1.3em" fill="currentColor"><path d="M4 4h16v11H9l-5 4z"/></svg></div>
+      <div class="info">Seated <b id="hlcount">40 / 40</b></div>
+      <button class="btn big">ROLL</button>
+      <div class="info">Max <b>1,000g</b></div>
+      <div class="iconbtn"><svg viewBox="0 0 24 24" width="1.3em" height="1.3em" fill="currentColor"><path d="M4 9h4l5-4v14l-5-4H4z"/><path d="M16 8c2 2 2 6 0 8" stroke="currentColor" stroke-width="2" fill="none"/></svg></div>
+    </div>
+  </section>
+
+  <!-- ============ BLACKJACK ============ -->
+  <section class="scene" id="blackjack">
+    <div class="table" style="top:13%">
+      <div class="felt-print" style="top:37%;font-size:1.25em">BLACKJACK PAYS 3 TO 2</div>
+      <div class="felt-print" style="top:44%;font-size:.8em;color:rgba(255,214,90,.3)">DEALER STANDS ON 17</div>
+    </div>
+    <div class="seat" id="dealer" style="left:50%;top:9%;--cls:#4be04b;width:9em"><div class="emote"></div><div class="actor" style="width:6em;height:6em"></div><div class="plate"><div class="nm">Grizzlenut</div><div class="gl">Goblin croupier</div></div></div>
+    <div id="shoe"><img src="assets/cards/card_back.png"><span>SHOE · <b id="shoeleft">312</b> / 312</span></div>
+    <div id="bjseats"></div>
+    <div id="rolltoast"></div>
+    <div class="plaque" style="top:1.2em;left:22%">BLACKJACK<small>6 DECKS · 50 – 2,000g</small></div>
+    <button class="btn leave">Leave Table</button>
+    <div class="tabs" style="top:26%"><div class="on">Ledger</div><div>History</div><div>Rules</div></div>
+    <div class="bar">
+      <img src="assets/chips/chipWhite_border.png" style="height:70%">
+      <img src="assets/chips/chipRedWhite_border.png" style="height:70%">
+      <img src="assets/chips/chipBlueWhite_border.png" style="height:70%">
+      <img src="assets/chips/chipGreenWhite_border.png" style="height:70%">
+      <img src="assets/chips/chipBlackWhite_border.png" style="height:70%">
+      <button class="btn">HIT</button><button class="btn">STAND</button><button class="btn gold">DOUBLE</button>
+      <div class="info">Bet <b>200g</b></div>
+    </div>
+  </section>
+</div>
+
+<script>
+// ---------- layout: 1em = 1% of the 16:9 stage ----------
+const stage = document.getElementById('stage');
+function fit(){ const w = Math.min(innerWidth, innerHeight*16/9); stage.style.width = w+'px'; stage.style.height = (w*9/16)+'px'; stage.style.fontSize = (w/100)+'px'; }
+addEventListener('resize', fit); fit();
+
+// ---------- sound (Kenney casino sfx + a synthesized heartbeat) ----------
+let soundOn = false, actx;
+addEventListener('click', () => { if (!soundOn){ soundOn = true; actx = new AudioContext(); document.getElementById('soundhint').textContent = 'sound on'; } });
+const sfx = n => { if (!soundOn) return; const a = new Audio('assets/sfx/'+n+'.ogg'); a.volume = .6; a.play().catch(()=>{}); };
+function heartbeat(){ if (!soundOn) return; [0, .18].forEach((d,i) => { const o = actx.createOscillator(), g = actx.createGain(); o.frequency.value = i?48:60; o.connect(g); g.connect(actx.destination);
+  const t = actx.currentTime + d; g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(.9, t+.02); g.gain.exponentialRampToValueAtTime(.001, t+.22); o.start(t); o.stop(t+.25); }); }
+
+// ---------- placeholder for the 3D ModelScene actor ----------
+const bust = `<svg viewBox="0 0 100 110"><defs><radialGradient id="b" cx="50%" cy="30%"><stop offset="0" stop-color="#4a3626"/><stop offset="1" stop-color="#140c07"/></radialGradient></defs>
+  <circle cx="50" cy="38" r="20" fill="url(#b)" stroke="currentColor" stroke-opacity=".35"/><path d="M12 110 C14 72 30 62 50 62 C70 62 86 72 88 110Z" fill="url(#b)" stroke="currentColor" stroke-opacity=".35"/></svg><div class="tag3d">3D CHARACTER</div>`;
+document.querySelectorAll('.actor').forEach(a => { a.innerHTML = bust; a.style.color = getComputedStyle(a.closest('.seat')).getPropertyValue('--cls'); });
+
+// ---------- scene switching ----------
+let current = 'lobby'; const timers = [];
+const later = (fn, ms) => timers.push(setTimeout(fn, ms));
+function show(s){ timers.forEach(clearTimeout); timers.length = 0; stage.className = '';
+  document.querySelectorAll('.scene').forEach(e => e.classList.toggle('on', e.id === s));
+  document.querySelectorAll('#nav button').forEach(b => b.classList.toggle('on', b.dataset.s === s));
+  current = s; ({deathroll: runDeathroll, highlow: runHighLow, blackjack: runBlackjack}[s] || (()=>{}))(); }
+document.querySelectorAll('#nav button').forEach(b => b.onclick = e => { e.stopPropagation(); show(b.dataset.s); });
+
+// ---------- coin shower ----------
+function coins(cx, cy, n=70){ const sc = document.querySelector('.scene.on');
+  for (let i=0;i<n;i++){ const c = document.createElement('div'); c.className = 'coin';
+    const hue = Math.random(); if (hue > .8) c.style.filter = 'grayscale(1) brightness(1.3)'; else if (hue > .65) c.style.filter = 'hue-rotate(-25deg) saturate(1.4) brightness(.8)';
+    c.style.left = cx+'%'; c.style.top = cy+'%'; sc.appendChild(c);
+    const ang = Math.random()*Math.PI*2, sp = 8+Math.random()*22, dx = Math.cos(ang)*sp, dy = Math.sin(ang)*sp*.6 - 12;
+    c.animate([{transform:'translate(0,0) scale(.4)', opacity:1},{transform:`translate(${dx}em,${dy}em) scale(1)`, opacity:1, offset:.35},{transform:`translate(${dx*1.2}em,${dy+40}em) scale(.9) rotate(${Math.random()*720}deg)`, opacity:0}],
+      {duration:1800+Math.random()*900, easing:'cubic-bezier(.2,.7,.4,1)'}).onfinish = () => c.remove(); } }
+function emote(seat, text, ms=2200){ const e = seat.querySelector('.emote'); e.textContent = text; e.classList.add('on'); later(()=>e.classList.remove('on'), ms); }
+
+// ---------- DEATHROLL demo ----------
+function runDeathroll(){
+  const seq = [5000, 2214, 873, 402, 96, 31, 8, 3, 1];   // scripted for drama
+  const seats = [document.getElementById('dr0'), document.getElementById('dr1')];
+  const names = ['YOUR', "THORADIN'S"], big = document.getElementById('bignum'), rng = document.getElementById('range'),
+        trail = document.getElementById('trail'), lbl = document.getElementById('turnlbl'), st = document.getElementById('stinger'), dice = document.getElementById('dice');
+  seats.forEach(s => s.className = 'seat'); st.className = ''; big.className = ''; big.textContent = '5000'; rng.textContent = '/roll 1 – 5000'; trail.innerHTML = '<span>5000</span>';
+  let i = 1, turn = 1;
+  const setTurn = () => { seats.forEach((s,k) => s.classList.toggle('turn', k===turn)); lbl.textContent = names[turn]+' ROLL'; };
+  setTurn();
+  function step(){
+    if (current !== 'deathroll') return;
+    const max = seq[i-1], val = seq[i];
+    sfx(i%2 ? 'diceThrow1' : 'diceThrow2');
+    dice.animate([{opacity:1, transform:'translate(-50%,-50%) translate(-14em,6em) rotate(0) scale(.6)'},{opacity:1, transform:'translate(-50%,-50%) translate(0,0) rotate(900deg) scale(1.3)'},{opacity:0, transform:'translate(-50%,-50%) rotate(1080deg) scale(1.6)'}], {duration:650, easing:'ease-out'});
+    let t = 0; const spin = setInterval(() => { big.textContent = 1 + Math.floor(Math.random()*max); if (++t > 8){ clearInterval(spin); land(); } }, 60);
+    function land(){
+      big.textContent = val; big.classList.add('hit'); later(()=>big.classList.remove('hit'), 180);
+      trail.innerHTML += `<i>›</i><span>${val}</span>`;
+      big.classList.toggle('danger', val < 10);
+      stage.className = val < 4 ? 'shake2' : val < 10 ? 'shake1' : '';
+      if (val < 100) heartbeat();
+      if (val === 1){
+        stage.className = 'shake2'; later(()=>stage.className='', 700);
+        seats[turn].classList.remove('turn'); seats[turn].classList.add('dead');
+        const winner = 1 - turn; seats[winner].classList.remove('turn'); seats[winner].classList.add('win');
+        st.querySelector('p').textContent = (turn ? 'Thoradin' : 'You') + ' rolled a 1 and pays 500g';
+        later(()=>{ st.className = 'on'; }, 500);
+        later(()=>{ st.className = ''; coins(winner ? 88 : 12, 40); sfx('chipsStack1'); emote(seats[winner], winner ? 'Thoradin cheers!' : 'You cheer!'); emote(seats[turn], turn ? 'Thoradin cries.' : 'You cry.'); }, 2600);
+        later(runDeathroll, 7000); return;
+      }
+      rng.textContent = `/roll 1 – ${val}`;
+      turn = 1 - turn; i++; setTurn();
+      if (val < 40) emote(seats[1-turn], ['Come on...', 'Not a one, not a one', 'Oof.'][i%3], 1500);
+      later(step, val < 10 ? 2200 : 1500);
+    }
+  }
+  later(step, 1300);
+}
+
+// ---------- HIGH-LOW demo (40 seats, roll board) ----------
+const NAMES = ['Efe','Thoradin','Mira','Brightwhisk','Kaelra','Grizzlenut','Dorn','Ysolde','Fennick','Halvar','Sirelle','Bramble','Ostrik','Velia','Tamsin','Rook','Jorah','Lirien','Mags','Pell','Quill','Sabre','Tobin','Ulla','Vex','Wren','Yara','Zeb','Aldric','Bess','Corvin','Della','Eamon','Fia','Gorm','Hild','Iris','Jask','Kell','Lumi'];
+function runHighLow(){
+  const board = document.getElementById('board'), res = document.getElementById('hlres');
+  const cls = ['--pal','--war','--mag','--pri','--dru','--rog','--hun','--wlk'];
+  document.getElementById('hlseats').innerHTML = [180,212,244,296,328,0,32,148].map((a,k) => { const p = seatPos(a);
+    return `<div class="seat" style="left:${p.x}%;top:${p.y}%;--cls:var(${cls[k]});font-size:.8em"><div class="actor"></div><div class="plate"><div class="nm">${NAMES[k]}</div></div></div>`; }).join('');
+  document.querySelectorAll('#hlseats .actor').forEach(a => { a.innerHTML = bust; a.style.color = getComputedStyle(a.closest('.seat')).getPropertyValue('--cls'); });
+  board.innerHTML = NAMES.map((n,k)=>`<div id="hl${k}"><span>${n}</span><b>…</b></div>`).join('');
+  res.innerHTML = 'Everyone: /roll 1 – 1000';
+  const rolls = NAMES.map(() => 1 + Math.floor(Math.random()*1000)); rolls[0] = 987; rolls[3] = 12;
+  const order = NAMES.map((_,k)=>k).sort(()=>Math.random()-.5); let n = 0;
+  const tick = setInterval(() => {
+    if (current !== 'highlow'){ clearInterval(tick); return; }
+    const k = order[n++]; document.querySelector(`#hl${k} b`).textContent = rolls[k];
+    if (n % 3 === 0) sfx('dieThrow1');
+    const done = order.slice(0,n); const hi = done.reduce((a,b)=>rolls[a]>=rolls[b]?a:b), lo = done.reduce((a,b)=>rolls[a]<=rolls[b]?a:b);
+    board.querySelectorAll('div').forEach(d => d.className = ''); document.getElementById('hl'+hi).className = 'hi'; document.getElementById('hl'+lo).className = 'lo';
+    res.innerHTML = `High <b>${NAMES[hi]} ${rolls[hi]}</b> &nbsp;·&nbsp; Low <em>${NAMES[lo]} ${rolls[lo]}</em>`;
+    if (n === NAMES.length){ clearInterval(tick);
+      later(()=>{ res.innerHTML = `<em>${NAMES[lo]}</em> pays <b>${NAMES[hi]}</b> ${rolls[hi]-rolls[lo]}g`; coins(50, 22, 50); sfx('chipsStack2'); }, 700);
+      later(runHighLow, 6000); }
+  }, 130);
+}
+
+// ---------- BLACKJACK demo (cards drawn by /roll from a 312-card shoe) ----------
+const SUITS = ['hearts','diamonds','clubs','spades'], RANKS = ['A','02','03','04','05','06','07','08','09','10','J','Q','K'], SYM = {hearts:'♥',diamonds:'♦',clubs:'♣',spades:'♠'};
+const BJSEATS = [{n:'Efe',c:'--pal',a:158},{n:'Thoradin',c:'--war',a:128},{n:'Mira',c:'--mag',a:90},{n:'Kaelra',c:'--dru',a:52},{n:'Fennick',c:'--rog',a:22}];
+function seatPos(a){ const r = a*Math.PI/180; return {x: 50 + 41*Math.cos(r), y: 44 + 31*Math.sin(r)}; }
+function cardVal(r){ return r==='A' ? 11 : 'JQK'.includes(r) || r==='10' ? 10 : +r; }
+function handTotal(cs){ let t = 0, a = 0; cs.forEach(c => { t += cardVal(c.r); if (c.r==='A') a++; }); while (t > 21 && a){ t -= 10; a--; } return t; }
+function runBlackjack(){
+  const wrap = document.getElementById('bjseats'), sc = document.getElementById('blackjack'), toast = document.getElementById('rolltoast');
+  sc.querySelectorAll('.card,.total,.float').forEach(e => e.remove()); toast.innerHTML = '';
+  wrap.innerHTML = BJSEATS.map((s,k) => { const p = seatPos(s.a), bx = 50 + 27*Math.cos(s.a*Math.PI/180), by = 45 + 20*Math.sin(s.a*Math.PI/180);
+    return `<div class="betring" style="left:${bx}%;top:${by}%"><img src="assets/chips/chip${['RedWhite','BlueWhite','GreenWhite','BlackWhite','WhiteBlue'][k]}_border.png" style="top:.9em"><img src="assets/chips/chip${['RedWhite','BlueWhite','GreenWhite','BlackWhite','WhiteBlue'][k]}_border.png" style="top:.6em"></div>
+      <div class="seat" id="bj${k}" style="left:${p.x}%;top:${p.y}%;--cls:var(${s.c})"><div class="emote"></div><div class="actor"></div><div class="plate"><div class="nm">${s.n}</div><div class="gl">${[200,100,500,50,1000][k]}g</div></div></div>`; }).join('');
+  wrap.querySelectorAll('.actor').forEach(a => { a.innerHTML = bust; a.style.color = getComputedStyle(a.closest('.seat')).getPropertyValue('--cls'); });
+  let left = 312; document.getElementById('shoeleft').textContent = left;
+  const hands = BJSEATS.map(() => []), dealer = [];
+  // card target spot for seat k (between bet ring and table centre); dealer = -1
+  const spot = (k, i) => k < 0 ? {x: 45 + i*5, y: 19} : (() => { const a = BJSEATS[k].a*Math.PI/180; return {x: 50 + 20*Math.cos(a) - 2.3 + i*1.8, y: 42 + 13*Math.sin(a) - 5 - i*.8}; })();
+  const totals = {};
+  function showTotal(k){ const h = k<0 ? dealer : hands[k], s = spot(k, 0); let t = totals[k];
+    if (!t){ t = totals[k] = document.createElement('div'); t.className = 'total'; sc.appendChild(t); }
+    t.style.left = (s.x + 2.3)+'%'; t.style.top = (s.y + (k<0 ? 12.5 : 12))+'%'; t.textContent = handTotal(h); t.classList.add('on'); }
+  function deal(k, faceDown){
+    const roll = 1 + Math.floor(Math.random()*left), c = {s: SUITS[Math.floor(Math.random()*4)], r: RANKS[Math.floor(Math.random()*13)]};
+    const h = k<0 ? dealer : hands[k]; h.push(c); left--; document.getElementById('shoeleft').textContent = left;
+    const el = document.createElement('div'); el.className = 'card down';
+    el.innerHTML = `<img src="assets/cards/card_${c.s}_${c.r}.png"><img class="back" src="assets/cards/card_back.png">`;
+    el.style.left = '73.5%'; el.style.top = '14%'; el.style.zIndex = 10 + h.length; sc.appendChild(el);
+    const who = k<0 ? 'Grizzlenut' : BJSEATS[k].n;
+    toast.innerHTML += `<div>Grizzlenut rolls ${roll} (1-${left+1}) <i>→ ${c.r.replace(/^0/,'')}${SYM[c.s]} to ${who}</i></div>`;
+    if (toast.children.length > 4) toast.firstChild.remove();
+    sfx(Math.random()<.5 ? 'cardSlide1' : 'cardSlide2');
+    requestAnimationFrame(() => requestAnimationFrame(() => { const s = spot(k, h.length-1); el.style.left = s.x+'%'; el.style.top = s.y+'%'; if (!faceDown) later(()=>{ el.classList.remove('down'); sfx('cardPlace1'); if (k>=0 || dealer.length>1) showTotal(k); }, 480); }));
+    return el; }
+  let t = 600, hole;
+  [0,1].forEach(r => { BJSEATS.forEach((_,k) => { later(()=>deal(k), t); t += 420; }); later(()=>{ const e = deal(-1, r===1); if (r===1) hole = e; else showTotal(-1); }, t); t += 420; });
+  later(()=>{ emote(document.getElementById('bj0'), 'Hit me!'); deal(0); }, t += 900);
+  later(()=>{ emote(document.getElementById('bj2'), 'Stand.'); }, t += 1000);
+  later(()=>{ hole.classList.remove('down'); sfx('cardPlace2'); showTotal(-1); }, t += 1200);
+  later(()=>{ while (handTotal(dealer) < 17 && dealer.length < 5) deal(-1); }, t += 900);
+  later(()=>{ const d = handTotal(dealer);
+    BJSEATS.forEach((s,k) => { const p = handTotal(hands[k]), bet = [200,100,500,50,1000][k];
+      const win = p <= 21 && (d > 21 || p > d), push = p <= 21 && p === d, f = document.createElement('div'); f.className = 'float';
+      const pos = seatPos(s.a); f.style.left = pos.x+'%'; f.style.top = (pos.y-16)+'%';
+      f.textContent = p > 21 ? 'BUST' : win ? `+${bet}g` : push ? 'PUSH' : `-${bet}g`; f.style.color = win ? '#ffd100' : push ? '#ddd' : '#ff5a3c';
+      sc.appendChild(f); requestAnimationFrame(()=>{ f.style.transform = 'translate(-50%,-3em)'; });
+      if (win){ document.getElementById('bj'+k).classList.add('win'); coins(pos.x, pos.y-6, 18); } });
+    sfx('chipsStack1'); }, t += 1600);
+  later(runBlackjack, t + 5500);
+}
+show('lobby');
+</script>
+</body>
+</html>

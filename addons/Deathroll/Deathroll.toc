@@ -1,0 +1,17 @@
+## Interface: 16001
+## Title: Deathroll
+## Notes: Sit at a real gambling table with your friends. /dr
+## Version: @project-version@
+## Author: imperial64
+## SavedVariables: DeathrollDB
+## IconTexture: Interface\Icons\INV_Misc_Dice_02
+## AddonCompartmentFunc: Deathroll_OnAddonCompartmentClick
+
+Rolls.lua
+Games.lua
+Table.lua
+Ledger.lua
+Scene.lua
+Stage.lua
+UI.lua
+Core.lua

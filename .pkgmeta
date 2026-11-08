@@ -1,0 +1,12 @@
+# BigWigs packager configuration (same setup as dynamic-ambiance-forever).
+package-as: Deathroll
+
+move-folders:
+  Deathroll/addons/Deathroll: Deathroll
+
+ignore:
+  - mockup
+  - spike
+  - scripts
+  - tests
+  - README.md

@@ -1,0 +1,7 @@
+## Interface: 16001
+## Title: Deathroll Spike
+## Notes: Throwaway checks for Deathroll on WoW Forever. Type /drs
+## Author: imperial64
+## SavedVariables: DeathrollSpikeDB
+
+Spike.lua

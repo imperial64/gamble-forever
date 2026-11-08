@@ -1,0 +1,8 @@
+.playwright-cli/
+.release/
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini
