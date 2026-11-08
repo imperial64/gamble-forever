@@ -1297,6 +1297,16 @@ local function lcard(key, id, x, y, scale)
     tx:SetPoint("CENTER", L.play, "TOP", x, y)
     tx:Show()
 end
+local ltexts = {}
+local function ltext(key, text, x, y, color)
+    local fs = ltexts[key]
+    if not fs then fs = font(L.play, FRIZ, 11, ""); ltexts[key] = fs end
+    fs.used = true
+    fs:SetText(text)
+    fs:SetTextColor(unpack(color or INK))
+    fs:SetPoint("CENTER", L.play, "TOP", x, y)
+    fs:Show()
+end
 -- a centred row of cards; `false` entries are face down
 local function cardRow(key, list, cx, y, scale)
     local step = CARD_W * scale + 4
@@ -1324,30 +1334,35 @@ local function playBlackjack(t)
     else
         L.pRow1:SetText("Dealer")
     end
-    -- the hand whose turn it is; otherwise mine, or the first player's
-    local mySeat = ns.Table.mySeat()
-    local s = t.turn and t.turn[1]
-        or (mySeat and mySeat >= BJ.first(t) and mySeat) or BJ.first(t)
-    local hands = t.hands and t.hands[s] or {}
-    local who = ns.Rolls.same(t.seats[s], ns.me()) and "You" or nm(t.seats[s])
-    local labels = {}
-    for h, hand in ipairs(hands) do
-        local cx = #hands > 1 and (h - 1.5) * 200 or 0
-        if #hand.cards > 0 then cardRow("p" .. h, hand.cards, cx, -222, .7) end
-        local active = t.turn and t.turn[2] == h
-        labels[#labels + 1] = (#hands > 1 and (active and "> " or "") or "")
-            .. handLabel(hand, t.outcome and t.outcome[s] and t.outcome[s][h], t)
-    end
-    L.pRow2:SetText(who .. "   " .. table.concat(labels, "      "))
-    local lines = {}
-    if t.phase == "done" and t.results then
-        for p = BJ.first(t), #t.seats do
-            local r = t.results[p] or 0
-            lines[#lines + 1] = ("%s   %s"):format(nm(t.seats[p]), r > 0 and ("|cff1f7a1f+" .. money(t, r) .. "|r")
-                or r < 0 and ("|cff8a1a08-" .. money(t, -r) .. "|r") or "push")
+    -- every player's hands side by side under the dealer; a split hand sits under the first
+    local first = BJ.first(t)
+    local n = #t.seats - first + 1
+    local colW = math.min(200, 400 / math.max(1, n))
+    local scale = n <= 2 and .7 or .55
+    for s = first, #t.seats do
+        local cx = (s - first + 1 - (n + 1) / 2) * colW
+        local onTurn = t.turn and t.turn[1] == s
+        local who = ns.Rolls.same(t.seats[s], ns.me()) and "You" or nm(t.seats[s])
+        ltext("n" .. s, who, cx, -172, onTurn and INK_RED or INK)
+        for h, hand in ipairs(t.hands and t.hands[s] or {}) do
+            local y = -205 - (h - 1) * 78
+            local cw = CARD_W * scale
+            local step = math.max(8, math.min(cw + 4, (colW - cw - 6) / math.max(1, #hand.cards - 1)))
+            for i, card in ipairs(hand.cards) do
+                lcard(("p%d.%d.%d"):format(s, h, i), card, cx + (i - (#hand.cards + 1) / 2) * step, y, scale)
+            end
+            if #hand.cards > 0 then
+                local active = onTurn and t.turn[2] == h
+                ltext(("t%d.%d"):format(s, h), handLabel(hand), cx, y - 31, active and INK_RED or INK)
+                local r = t.outcome and t.outcome[s] and t.outcome[s][h]
+                if r then
+                    ltext(("o%d.%d"):format(s, h), r > 0 and ("|cff1f7a1f+" .. ns.coins(r) .. "|r")
+                        or r < 0 and ("|cff8a1a08-" .. ns.coins(-r) .. "|r") or "push", cx, y - 43)
+                end
+            end
         end
     end
-    setLines(lines, -270)
+    setLines({}, 0)
     local whoTurn = t.turn and t.seats[t.turn[1]]
     L.pTurn:SetText(t.phase == "dealing" and (t.reshuffled and "New shoe. Dealing..." or "Dealing...")
         or t.phase == "playing" and whoTurn and (ns.Rolls.same(whoTurn, ns.me()) and "Your hand: hit, stand, double or split" or (nm(whoTurn) .. "'s hand"))
@@ -1363,14 +1378,23 @@ local function playPoker(t)
     if t.board and #t.board > 0 then cardRow("b", t.board, 0, -128, .75) end
     local me = ns.Table.mySeat()
     local hole = t.myHole or (me and t.inHand and t.inHand[me] and { false, false })
-    if hole then cardRow("h", hole, 0, -222, .85) end
     local note = ""
     if hole and hole[1] and t.board and #t.board >= 3 then
         local cards = { hole[1], hole[2] }
         for _, c in ipairs(t.board) do cards[#cards + 1] = c end
-        note = "   -   " .. ns.Cards.handName(ns.Cards.eval(cards))
+        note = "  -  " .. ns.Cards.handName(ns.Cards.eval(cards))
     end
-    L.pRow2:SetText((me and t.inHand and not t.inHand[me] and "You folded" or "Your hand") .. note)
+    -- at a showdown someone else won: their hand next to mine
+    local w = t.phase == "done" and t.shown and t.winners and t.winners[1]
+    local iWon = w and w == me
+    if w and not iWon and t.shown[w] then
+        ltext("wl", ("%s wins  -  %s"):format(nm(t.seats[w]), ns.Cards.handName(t.scores[w])), 105, -172, INK_RED)
+        cardRow("w", t.shown[w], 105, -222, .75)
+    end
+    local mx = (w and not iWon and t.shown[w]) and -105 or 0
+    if hole then cardRow("h", hole, mx, -222, w and not iWon and .75 or .85) end
+    local mine = me and t.inHand and not t.inHand[me] and "You folded" or iWon and "You win" or "Your hand"
+    ltext("ml", mine .. note, mx, -172, iWon and INK_RED or INK)
     local lines = {}
     if me and t.total then
         local stack = t.cap - (t.total[me] or 0)
@@ -1399,8 +1423,8 @@ local function refreshPlay(c)
         addLog(c, ("|cff5a3a10-  Round %d  -|r"):format(t.round))
     end
     L.pTitle:SetText(ns.Games[g].name)
-    L.pBig:SetText(""); L.pRow1:SetText(""); L.pRow2:SetText(""); L.pBottom:SetText("")
-    for _, tx in pairs(lcards) do tx.used = false end
+    L.pBig:SetText(""); L.pRow1:SetText(""); L.pBottom:SetText("")
+    for _, pool in ipairs({ lcards, ltexts }) do for _, x in pairs(pool) do x.used = false end end
     L.pCoin:SetShown(g == "coinflip")
     if g == "deathroll" then
         L.pSub:SetText(("%s  -  wager %s  -  start %d"):format(#t.seats == 2 and "1v1" or "Free-for-all", money(t, t.wager), t.start))
@@ -1435,7 +1459,7 @@ local function refreshPlay(c)
         playPoker(t)
     end
     if ns.lockdown() then L.pTurn:SetText("Paused: the game blocks addon chat during encounters.") end
-    for _, tx in pairs(lcards) do if not tx.used then tx:Hide() end end
+    for _, pool in ipairs({ lcards, ltexts }) do for _, x in pairs(pool) do if not x.used then x:Hide() end end end
 
     -- actions, in the right-hand panel
     local between = t.phase == "seating" or t.phase == "done"
@@ -1771,8 +1795,6 @@ local function buildLobby()
     L.pBig:SetPoint("TOP", 0, -82)
     L.pRow1 = font(play, FRIZ, 12, "", INK)        -- card games: dealer / board
     L.pRow1:SetPoint("TOP", 0, -84)
-    L.pRow2 = font(play, FRIZ, 12, "", INK)        -- card games: the hand on turn / my hand
-    L.pRow2:SetPoint("TOP", 0, -172)
     L.pLines = {}                                  -- roll log, newest first; card game results
     for i = 1, 13 do
         local fs = font(play, FRIZ, 11, "", INK)
