@@ -214,10 +214,8 @@ end
 
 ---------------------------------------------------------------- table view
 
-local edges = {}   -- full-screen vignette; window mode hides it
 local function edge(parent, side, orientation, from, to, size)
     local t = parent:CreateTexture(nil, "BACKGROUND")
-    edges[#edges + 1] = t
     t:SetColorTexture(1, 1, 1, 1)
     if side == "LEFT" or side == "RIGHT" then
         t:SetPoint("TOP" .. side); t:SetPoint("BOTTOM" .. side); t:SetWidth(size)
@@ -365,27 +363,50 @@ end
 
 -- Coin seen from the front while it flips end over end: angle 0 shows heads, pi shows tails.
 -- The face squashes with |cos|; the edge peeks out below it with |sin|, so it reads as a thick coin.
+-- Two coins flip together: the table view's and the lobby's smaller one. A set holds one coin's
+-- textures, the frame it centres on (`at`), its size factor `k` and a vertical offset `dy`.
 local COIN_SIZE, COIN_EDGE, COIN_REST = 140, 16, 30
+local coinSets = {}
+local function coinSet(parent, at, k, dy)
+    local cs = { at = at, k = k, dy = dy }
+    cs.shadow = parent:CreateTexture(nil, "BORDER")
+    cs.shadow:SetTexture(ns.media .. "glow.png")
+    cs.shadow:SetVertexColor(0, 0, 0, .55)
+    cs.shadow:SetPoint("CENTER", at, "CENTER", 0, (COIN_REST - COIN_SIZE / 2 + 4) * k + dy)
+    cs.flash = parent:CreateTexture(nil, "BACKGROUND")
+    cs.flash:SetTexture(ns.media .. "glow.png")
+    cs.flash:SetBlendMode("ADD")
+    cs.flash:SetVertexColor(1, .8, .3, 0)
+    cs.flash:SetSize(360 * k, 360 * k)
+    cs.flash:SetPoint("CENTER", at, "CENTER", 0, COIN_REST * k + dy)
+    cs.edge = parent:CreateTexture(nil, "ARTWORK", nil, 1)
+    cs.edge:SetTexture(ns.media .. "coin_edge.png")
+    cs.coin = parent:CreateTexture(nil, "ARTWORK", nil, 2)
+    coinSets[#coinSets + 1] = cs
+end
 local function drawCoin(angle, y, scale, spin)
-    local cs, sn = math.cos(angle), math.abs(math.sin(angle))
-    local size = COIN_SIZE * scale
-    local h = math.max(1, size * math.abs(cs))
-    local face = cs >= 0 and "heads" or "tails"
-    if W.coinFace ~= face then
-        W.coinFace = face
-        W.coin:SetTexture(ns.media .. "coin_" .. face .. ".png")
-    end
-    local e = COIN_EDGE * scale * sn
-    W.coin:SetSize(size, h)
-    W.coin:SetPoint("CENTER", W.content, "CENTER", 0, y)
-    W.coinEdge:SetSize(size, h + e)
-    W.coinEdge:SetPoint("CENTER", W.content, "CENTER", 0, y - e / 2)
-    W.coin:SetRotation(spin or 0); W.coinEdge:SetRotation(spin or 0)
+    local cosA, sn = math.cos(angle), math.abs(math.sin(angle))
+    local face = cosA >= 0 and "heads" or "tails"
     -- shadow on the felt: smaller and fainter the higher the coin is
     local lift = math.min(1, math.max(0, (y - COIN_REST) / 240))
-    W.coinShadow:SetSize(size * (1.1 - .5 * lift), size * .35 * (1.1 - .5 * lift))
-    W.coinShadow:SetAlpha(1 - .7 * lift)
+    for _, cs in ipairs(coinSets) do
+        local size = COIN_SIZE * scale * cs.k
+        local h = math.max(1, size * math.abs(cosA))
+        if cs.face ~= face then
+            cs.face = face
+            cs.coin:SetTexture(ns.media .. "coin_" .. face .. ".png")
+        end
+        local e, cy = COIN_EDGE * scale * sn * cs.k, y * cs.k + cs.dy
+        cs.coin:SetSize(size, h)
+        cs.coin:SetPoint("CENTER", cs.at, "CENTER", 0, cy)
+        cs.edge:SetSize(size, h + e)
+        cs.edge:SetPoint("CENTER", cs.at, "CENTER", 0, cy - e / 2)
+        cs.coin:SetRotation(spin or 0); cs.edge:SetRotation(spin or 0)
+        cs.shadow:SetSize(size * (1.1 - .5 * lift), size * .35 * (1.1 - .5 * lift))
+        cs.shadow:SetAlpha(1 - .7 * lift)
+    end
 end
+local function coinFlash(a) for _, cs in ipairs(coinSets) do cs.flash:SetVertexColor(1, .8, .3, a) end end
 
 local function buildTable()
     view = CreateFrame("Frame", "GambleForeverTableView", nil)   -- no parent: stays visible while UIParent is hidden
@@ -396,45 +417,6 @@ local function buildTable()
     edge(view, "RIGHT", "HORIZONTAL", 0, .9, 380)
     edge(view, "TOP", "VERTICAL", 0, .8, 230)
     edge(view, "BOTTOM", "VERTICAL", .95, 0, 260)
-
-    -- window mode: dark panel with a gold rim; drag to move, Ctrl + wheel to resize
-    W.winBg = view:CreateTexture(nil, "BACKGROUND")
-    W.winBg:SetAllPoints()
-    W.winBg:SetColorTexture(.04, .03, .02, .88)
-    W.winRim = {}
-    for _, side in ipairs({ "TOP", "BOTTOM", "LEFT", "RIGHT" }) do
-        local t = view:CreateTexture(nil, "BORDER")
-        t:SetColorTexture(.75, .6, .25, .9)
-        if side == "TOP" or side == "BOTTOM" then
-            t:SetPoint(side .. "LEFT"); t:SetPoint(side .. "RIGHT"); t:SetHeight(2)
-        else
-            t:SetPoint("TOP" .. side); t:SetPoint("BOTTOM" .. side); t:SetWidth(2)
-        end
-        W.winRim[#W.winRim + 1] = t
-    end
-    W.winHint = font(view, FRIZ, 12, "OUTLINE", { .6, .55, .45 })
-    W.winHint:SetPoint("BOTTOMLEFT", 12, 10)
-    W.winHint:SetText("Drag to move. Ctrl + mouse wheel to resize.")
-    view:SetMovable(true)
-    view:SetClampedToScreen(true)
-    view:RegisterForDrag("LeftButton")
-    view:SetScript("OnDragStart", view.StartMoving)
-    view:SetScript("OnDragStop", function(self)
-        self:StopMovingOrSizing()
-        self:SetUserPlaced(false)   -- we place it ourselves; keep it out of layout-cache.txt
-        local w, s = GambleForeverDB.settings.window, self:GetScale()
-        local x, y = self:GetCenter()
-        w.x, w.y = x * s, y * s   -- UIParent units, so a new scale keeps the centre
-    end)
-    view:SetScript("OnMouseWheel", function(self, delta)
-        if not IsControlKeyDown() then return end
-        local w = GambleForeverDB.settings.window
-        w.scale = math.max(.35, math.min(1.2, w.scale + delta * .05))
-        UI.placeWindow()
-    end)
-    -- Esc in window mode goes through UISpecialFrames; any hide (Esc, CloseAllWindows) leaves the table
-    tinsert(UISpecialFrames, "GambleForeverTableView")
-    view:SetScript("OnHide", function() ns.Stage.leave("hide") end)
 
     local c = CreateFrame("Frame", nil, view)
     c:SetSize(1365, 768)
@@ -498,20 +480,7 @@ local function buildTable()
     W.cf = CreateFrame("Frame", nil, c)
     W.cf:SetAllPoints()
     -- the coin: a face (heads or tails) over its edge, a shadow on the felt and a landing flash
-    W.coinShadow = W.cf:CreateTexture(nil, "BORDER")
-    W.coinShadow:SetTexture(ns.media .. "glow.png")
-    W.coinShadow:SetVertexColor(0, 0, 0, .55)
-    W.coinShadow:SetPoint("CENTER", c, "CENTER", 0, COIN_REST - COIN_SIZE / 2 + 4)
-    W.coinFlash = W.cf:CreateTexture(nil, "BACKGROUND")
-    W.coinFlash:SetTexture(ns.media .. "glow.png")
-    W.coinFlash:SetBlendMode("ADD")
-    W.coinFlash:SetVertexColor(1, .8, .3, 0)
-    W.coinFlash:SetSize(360, 360)
-    W.coinFlash:SetPoint("CENTER", c, "CENTER", 0, COIN_REST)
-    W.coinEdge = W.cf:CreateTexture(nil, "ARTWORK", nil, 1)
-    W.coinEdge:SetTexture(ns.media .. "coin_edge.png")
-    W.coin = W.cf:CreateTexture(nil, "ARTWORK", nil, 2)
-    drawCoin(0, COIN_REST, 1)
+    coinSet(W.cf, c, 1, 0)
     W.cfInfo = font(W.cf, MORPHEUS, 30, "OUTLINE", GOLD)
     W.cfInfo:SetPoint("CENTER", c, "CENTER", 0, -80)
     W.heads = font(W.cf, MORPHEUS, 26, "OUTLINE", GOLD)
@@ -645,12 +614,9 @@ local function buildTable()
     W.stingSub:SetPoint("TOP", W.stingText, "BOTTOM", 0, -6)
 
     view:SetScript("OnUpdate", onUpdate)
-    -- immersive only: UIParent is hidden, so Esc is caught here. A separate frame, because
-    -- window mode stays open in combat, where keyboard propagation calls are blocked.
-    W.keys = CreateFrame("Frame", nil, view)
-    W.keys:EnableKeyboard(true)
-    W.keys:SetPropagateKeyboardInput(true)
-    W.keys:SetScript("OnKeyDown", function(self, key)
+    view:EnableKeyboard(true)
+    view:SetPropagateKeyboardInput(true)
+    view:SetScript("OnKeyDown", function(self, key)
         if key == "ESCAPE" then
             self:SetPropagateKeyboardInput(false)
             ns.Stage.leave("hide")
@@ -967,6 +933,7 @@ function UI.stepRaise(dir)
     if not (c and can and can.raise) then return end
     W.raiseTo = math.max(can.minTo, math.min(can.maxTo, (W.raiseTo or can.minTo) + dir * c.t.bb))
     W.pkAmount:SetText("to " .. ns.coins(W.raiseTo))
+    UI.handle("lobby")
 end
 function UI.potRaise()
     local c = ns.Table.current()
@@ -976,6 +943,7 @@ function UI.potRaise()
     for s = 1, #c.t.seats do pot = pot + (c.t.total[s] or 0) end
     W.raiseTo = math.max(can.minTo, math.min(can.maxTo, c.t.curBet + pot + can.toCall))
     W.pkAmount:SetText("to " .. ns.coins(W.raiseTo))
+    UI.handle("lobby")
 end
 
 local function refreshControls(c, t, mine)
@@ -1075,10 +1043,11 @@ local function flipCoin(ev, t)
             drawCoin(turns + .5 * hop * (1 - q), COIN_REST + 16 * hop, 1)
         end, function()
             drawCoin(turns, COIN_REST, 1)
-            tween(.7, function(q) W.coinFlash:SetVertexColor(1, .8, .3, .9 * (1 - q)) end)
+            tween(.7, function(q) coinFlash(.9 * (1 - q)) end)
             ns.sound("chipsStack2")
             W.flipping = false
             release()
+            UI.handle("lobby")   -- the lobby's coin panel shows the result once the coin lands
             local side = ev.winner == 1 and "HEADS" or "TAILS"
             W.cfInfo:SetText(side .. "  -  " .. nm(t.seats[ev.winner]) .. " wins")
             stinger(side, nm(t.seats[ev.winner]) .. " wins " .. money(t, t.wager), 1.6, GOLD)
@@ -1276,6 +1245,224 @@ local function refreshRoom(cur)
     L.roomLeave:SetLabel(cur.hosting and "Close table" or "Leave table")
 end
 
+---------------------------------------------------------------- lobby game panel (Immersive off)
+
+-- With Immersive off the game plays in the lobby window: no characters or seats. Roll games
+-- keep a log of rolls and results, Coinflip shows the coin, Blackjack the dealer against the
+-- hand whose turn it is, Hold'em the board and my own hand.
+local playLog = { lines = {} }
+local function addLog(c, text)
+    if playLog.tid ~= c.tid then playLog.tid, playLog.round, playLog.lines = c.tid, nil, {} end
+    table.insert(playLog.lines, 1, text)
+    if #playLog.lines > 60 then table.remove(playLog.lines) end
+end
+
+local function logEvent(ev)
+    local c = ns.Table.current()
+    if not c then return end
+    local t = c.t
+    local who = ev.seat and nm(t.seats[ev.seat]) or "?"
+    if t.game == "deathroll" then
+        local prev = t.history[#t.history - 1] or t.start
+        if ev.kind == "first" then addLog(c, who .. " goes first")
+        elseif ev.kind == "roll" then addLog(c, ("%s rolls %d   (1 - %d)"):format(who, ev.value, prev))
+        elseif ev.kind == "out" or ev.kind == "win" then addLog(c, "|cff8a1a08" .. who .. " is out|r") end
+    elseif t.game == "highlow" and ev.kind == "roll" then
+        addLog(c, ("%s rolls %d%s"):format(who, ev.value, ev.tie and "   (roll-off)" or ""))
+    end
+end
+
+local function logSettled(t, debts)
+    local c = ns.Table.current()
+    if not c or (t.game ~= "deathroll" and t.game ~= "highlow") then return end
+    if #debts == 0 then addLog(c, "|cff8a1a08Nobody pays|r") end
+    for i = #debts, 1, -1 do
+        local d = debts[i]
+        addLog(c, ("|cff8a1a08%s pays %s %s|r"):format(nm(d.from), nm(d.to), money(t, d.amount)))
+    end
+end
+
+local lcards = {}
+local function lcard(key, id, x, y, scale)
+    local tx = lcards[key]
+    if not tx then
+        tx = L.play:CreateTexture(nil, "ARTWORK")
+        tx:SetTexCoord(11 / 64, 53 / 64, 2 / 64, 62 / 64)
+        lcards[key] = tx
+    end
+    tx.used = true
+    local file = cardFile(id)
+    if tx.file ~= file then tx:SetTexture(file, nil, nil, "NEAREST"); tx.file = file end
+    tx:SetSize(CARD_W * scale, CARD_H * scale)
+    tx:SetPoint("CENTER", L.play, "TOP", x, y)
+    tx:Show()
+end
+-- a centred row of cards; `false` entries are face down
+local function cardRow(key, list, cx, y, scale)
+    local step = CARD_W * scale + 4
+    for i, id in ipairs(list) do lcard(key .. i, id or nil, cx + (i - (#list + 1) / 2) * step, y, scale) end
+end
+
+local function setLines(lines, top)
+    for i, fs in ipairs(L.pLines) do
+        fs:SetText(lines[i] or "")
+        fs:SetShown(lines[i] ~= nil)
+        if i == 1 then fs:SetPoint("TOP", L.play, "TOP", 0, top) end
+    end
+end
+
+local function playBlackjack(t)
+    local BJ = ns.Games.blackjack
+    L.pSub:SetText(("Bet %s per hand  -  blackjack pays 3 to 2  -  dealer stands on 17"):format(money(t, t.wager)))
+    local d = t.dealer and t.dealer.cards or {}
+    if #d > 0 then
+        L.pRow1:SetText("Dealer   " .. handLabel(t.dealer))
+        local row = {}
+        for i, card in ipairs(d) do row[i] = card end
+        if #d == 1 and (t.phase == "dealing" or t.phase == "playing") then row[2] = false end
+        cardRow("d", row, 0, -128, .7)
+    else
+        L.pRow1:SetText("Dealer")
+    end
+    -- the hand whose turn it is; otherwise mine, or the first player's
+    local mySeat = ns.Table.mySeat()
+    local s = t.turn and t.turn[1]
+        or (mySeat and mySeat >= BJ.first(t) and mySeat) or BJ.first(t)
+    local hands = t.hands and t.hands[s] or {}
+    local who = ns.Rolls.same(t.seats[s], ns.me()) and "You" or nm(t.seats[s])
+    local labels = {}
+    for h, hand in ipairs(hands) do
+        local cx = #hands > 1 and (h - 1.5) * 200 or 0
+        if #hand.cards > 0 then cardRow("p" .. h, hand.cards, cx, -222, .7) end
+        local active = t.turn and t.turn[2] == h
+        labels[#labels + 1] = (#hands > 1 and (active and "> " or "") or "")
+            .. handLabel(hand, t.outcome and t.outcome[s] and t.outcome[s][h], t)
+    end
+    L.pRow2:SetText(who .. "   " .. table.concat(labels, "      "))
+    local lines = {}
+    if t.phase == "done" and t.results then
+        for p = BJ.first(t), #t.seats do
+            local r = t.results[p] or 0
+            lines[#lines + 1] = ("%s   %s"):format(nm(t.seats[p]), r > 0 and ("|cff1f7a1f+" .. money(t, r) .. "|r")
+                or r < 0 and ("|cff8a1a08-" .. money(t, -r) .. "|r") or "push")
+        end
+    end
+    setLines(lines, -270)
+    local whoTurn = t.turn and t.seats[t.turn[1]]
+    L.pTurn:SetText(t.phase == "dealing" and (t.reshuffled and "New shoe. Dealing..." or "Dealing...")
+        or t.phase == "playing" and whoTurn and (ns.Rolls.same(whoTurn, ns.me()) and "Your hand: hit, stand, double or split" or (nm(whoTurn) .. "'s hand"))
+        or t.phase == "dealer" and "Dealer draws" or t.phase == "done" and "Hand over" or "")
+end
+
+local function playPoker(t)
+    L.pSub:SetText(("Blinds %s / %s  -  everyone starts each hand with %s"):format(ns.coins(t.sb), ns.coins(t.bb), ns.coins(t.cap)))
+    local pot = 0
+    for s = 1, #t.seats do pot = pot + (t.total and t.total[s] or 0) end
+    local streetName = { preflop = "Pre-flop", flop = "Flop", turn = "Turn", river = "River", showdown = "Showdown" }
+    L.pRow1:SetText(("%s   -   pot %s"):format(streetName[t.street] or "", ns.coins(pot)))
+    if t.board and #t.board > 0 then cardRow("b", t.board, 0, -128, .75) end
+    local me = ns.Table.mySeat()
+    local hole = t.myHole or (me and t.inHand and t.inHand[me] and { false, false })
+    if hole then cardRow("h", hole, 0, -222, .85) end
+    local note = ""
+    if hole and hole[1] and t.board and #t.board >= 3 then
+        local cards = { hole[1], hole[2] }
+        for _, c in ipairs(t.board) do cards[#cards + 1] = c end
+        note = "   -   " .. ns.Cards.handName(ns.Cards.eval(cards))
+    end
+    L.pRow2:SetText((me and t.inHand and not t.inHand[me] and "You folded" or "Your hand") .. note)
+    local lines = {}
+    if me and t.total then
+        local stack = t.cap - (t.total[me] or 0)
+        lines[1] = ("Stack %s%s"):format(ns.coins(stack), (t.bet[me] or 0) > 0 and ("   -   bet " .. ns.coins(t.bet[me])) or "")
+    end
+    if t.phase == "done" and t.winners then
+        local names = {}
+        for _, s in ipairs(t.winners) do names[#names + 1] = nm(t.seats[s]) end
+        local s1 = t.winners[1]
+        local hn = t.scores and t.scores[s1] and ns.Cards.handName(t.scores[s1]) or "everyone else folded"
+        lines[#lines + 1] = ("|cff8a1a08%s %s %s  (%s)|r"):format(table.concat(names, " and "), #names > 1 and "split" or "wins",
+            ns.coins(pot), hn)
+    end
+    setLines(lines, -278)
+    local who = t.toAct and t.seats[t.toAct]
+    L.pTurn:SetText(t.phase == "betting" and who and (ns.Rolls.same(who, ns.me()) and "Your turn" or (nm(who) .. " to act"))
+        or t.phase == "done" and "Hand over" or "")
+end
+
+local function refreshPlay(c)
+    local t = c.t
+    local g = t.game
+    local mine = ns.Table.myTurn()
+    if playLog.tid == c.tid and playLog.round ~= t.round and (g == "deathroll" or g == "highlow") then
+        playLog.round = t.round
+        addLog(c, ("|cff5a3a10-  Round %d  -|r"):format(t.round))
+    end
+    L.pTitle:SetText(ns.Games[g].name)
+    L.pBig:SetText(""); L.pRow1:SetText(""); L.pRow2:SetText(""); L.pBottom:SetText("")
+    for _, tx in pairs(lcards) do tx.used = false end
+    L.pCoin:SetShown(g == "coinflip")
+    if g == "deathroll" then
+        L.pSub:SetText(("%s  -  wager %s  -  start %d"):format(#t.seats == 2 and "1v1" or "Free-for-all", money(t, t.wager), t.start))
+        L.pBig:SetText(t.phase == "done" and "1" or t.cur or t.start)
+        L.pTurn:SetText(t.phase == "first" and ("Rolling for who goes first (%s rolls 1 - %d)"):format(nm(t.host), #t.seats)
+            or t.phase == "rolling" and (mine and ("Your roll:  /roll 1 - " .. t.cur) or (nm(t.seats[t.turn]) .. "'s roll:  1 - " .. t.cur))
+            or t.phase == "done" and (nm(t.seats[t.winner]) .. " wins") or "")
+        setLines(playLog.lines, -136)
+    elseif g == "highlow" then
+        L.pSub:SetText(("Wager %s  -  everyone rolls 1 - %d  (%s)"):format(money(t, t.wager), t.range, unitNote(t)))
+        local waiting = #ns.Games.highlow.waitingOn(t)
+        if t.phase == "rolling" then
+            L.pTurn:SetText(("%s  -  %d of %d still to roll"):format(mine and ("Your roll:  /roll 1 - " .. t.range) or "Everyone rolls", waiting, #t.seats))
+        elseif t.phase == "tie" then
+            local names = {}
+            for _, s in ipairs(t.tieSeats or {}) do names[#names + 1] = nm(t.seats[s]) end
+            L.pTurn:SetText(("Roll-off for the %s roll: %s"):format(t.tieSide == "hi" and "high" or "low", table.concat(names, ", ")))
+        elseif t.phase == "done" then
+            L.pTurn:SetText(t.hiSeat and t.loSeat and (t.diff or 0) > 0
+                and ("%s pays %s %s"):format(nm(t.seats[t.loSeat]), nm(t.seats[t.hiSeat]), money(t, t.diff * t.unit)) or "Push: nobody pays")
+        end
+        setLines(playLog.lines, -84)
+    elseif g == "coinflip" then
+        L.pSub:SetText(("Wager %s  -  %s is heads, %s is tails"):format(money(t, t.wager), nm(t.seats[1]), nm(t.seats[2] or "?")))
+        L.pTurn:SetText("")
+        L.pBottom:SetText(W.flipping and "Flipping..." or t.phase == "done" and t.winner
+            and (((t.winner == 1) and "HEADS" or "TAILS") .. "  -  " .. nm(t.seats[t.winner]) .. " wins") or "")
+        setLines({}, 0)
+    elseif g == "blackjack" then
+        playBlackjack(t)
+    elseif g == "poker" then
+        playPoker(t)
+    end
+    if ns.lockdown() then L.pTurn:SetText("Paused: the game blocks addon chat during encounters.") end
+    for _, tx in pairs(lcards) do if not tx.used then tx:Hide() end end
+
+    -- actions, in the right-hand panel
+    local between = t.phase == "seating" or t.phase == "done"
+    local can = ns.Table.myActions()
+    local free = not ns.lockdown()
+    L.aRoll:SetShown(g == "deathroll" or g == "highlow")
+    L.aRoll:SetEnabled(mine and free or false)
+    L.aClose:SetShown(c.hosting and g == "highlow" and (t.phase == "rolling" or t.phase == "tie"))
+    for a, b in pairs(L.aBJ) do
+        b:SetShown(g == "blackjack")
+        b:SetEnabled(can and can[a] and free or false)
+    end
+    L.aPoker:SetShown(g == "poker")
+    if g == "poker" then
+        local on = can and free or false
+        L.aFold:SetEnabled(on); L.aCall:SetEnabled(on)
+        L.aCall:SetLabel(can and (can.check and "CHECK" or ("CALL " .. ns.coins(can.call or 0))) or "CHECK")
+        for _, b in ipairs({ L.aMinus, L.aPlus, L.aPot, L.aRaise, L.aAllin }) do b:SetEnabled(on and can.raise or false) end
+        L.aAmt:SetText(W.raiseTo and can and ("to " .. ns.coins(W.raiseTo)) or "")
+    end
+    local cards = g == "blackjack" or g == "poker"
+    L.roomMain:SetShown(c.hosting and between)
+    L.roomMain:SetLabel(cards and "Next hand" or "Rematch")
+    L.roomMain:SetEnabled(#t.seats >= ns.Games[g].minSeats)
+    L.roomMain:SetScript("OnClick", function() ns.Table.startGame() end)
+end
+
 local function refreshLobby()
     if not lobby then return end
     local cur = ns.Table.current()
@@ -1283,7 +1470,16 @@ local function refreshLobby()
     for _, p in ipairs(L.room) do p:SetShown(cur ~= nil) end
     L.rulesBox:SetShown(L.rulesBox.on and not cur)
     L.ledger:SetText(ledgerText())
-    if cur then refreshRoom(cur); return end
+    -- Immersive off and the game under way: the game panel takes the seat list's place
+    local playing = cur and cur.t.phase ~= "seating" and not GambleForeverDB.settings.immersive
+    L.play:SetShown(playing or false)
+    L.acts:SetShown(playing or false)
+    L.seatsPanel:SetShown(cur ~= nil and not playing)
+    L.roomStatus:SetShown(not playing); L.chatHint:SetShown(not playing)
+    L.roomMain:SetShown(true)
+    if cur then refreshRoom(cur) end
+    if playing then refreshPlay(cur) end
+    if cur then return end
     local list = {}
     for _, e in pairs(ns.Table.lobby) do list[#list + 1] = e end
     table.sort(list, function(a, b) return a.tid < b.tid end)
@@ -1502,6 +1698,7 @@ local function buildLobby()
 
     -- waiting room (replaces the two browse panels while I host or sit at a table)
     local seatsPanel = panel(30, -52, 417, 350)
+    L.seatsPanel = seatsPanel
     L.roomTitle = font(seatsPanel, MORPHEUS, 22, "", INK_RED)
     L.roomTitle:SetPoint("TOP", 0, -12)
     local rs = font(seatsPanel, FRIZ, 10, "", INK)
@@ -1550,6 +1747,7 @@ local function buildLobby()
     L.roomStatus:SetPoint("TOP", 0, -150)
     L.roomStatus:SetWidth(230)
     local chatHint = font(infoPanel, FRIZ, 10, "", INK)
+    L.chatHint = chatHint
     chatHint:SetPoint("TOP", L.roomStatus, "BOTTOM", 0, -10)
     chatHint:SetWidth(230)
     chatHint:SetText("Chat stays open until the host starts.\nEveryone seated moves to the table together.")
@@ -1558,6 +1756,77 @@ local function buildLobby()
     L.roomLeave = skinButton(infoPanel, "Leave table", 232, 28, "dark", function() ns.Table.close() end, 14)
     L.roomLeave:SetPoint("BOTTOM", 0, 16)
     L.room = { seatsPanel, infoPanel }
+
+    -- game panel (Immersive off): replaces the seat list once the game starts
+    local play = panel(30, -52, 417, 350)
+    L.play = play
+    L.pTitle = font(play, MORPHEUS, 22, "", INK_RED)
+    L.pTitle:SetPoint("TOP", 0, -10)
+    L.pSub = font(play, FRIZ, 10, "", INK)
+    L.pSub:SetPoint("TOP", L.pTitle, "BOTTOM", 0, -2)
+    L.pTurn = font(play, FRIZ, 13, "", INK_RED)
+    L.pTurn:SetPoint("TOP", 0, -60)
+    L.pTurn:SetWidth(395)
+    L.pBig = font(play, MORPHEUS, 46, "", INK_RED)
+    L.pBig:SetPoint("TOP", 0, -82)
+    L.pRow1 = font(play, FRIZ, 12, "", INK)        -- card games: dealer / board
+    L.pRow1:SetPoint("TOP", 0, -84)
+    L.pRow2 = font(play, FRIZ, 12, "", INK)        -- card games: the hand on turn / my hand
+    L.pRow2:SetPoint("TOP", 0, -172)
+    L.pLines = {}                                  -- roll log, newest first; card game results
+    for i = 1, 13 do
+        local fs = font(play, FRIZ, 11, "", INK)
+        if i > 1 then fs:SetPoint("TOP", L.pLines[i - 1], "BOTTOM", 0, -3) end
+        fs:SetWidth(390)
+        fs:SetWordWrap(false)
+        L.pLines[i] = fs
+    end
+    L.pCoin = CreateFrame("Frame", nil, play)
+    L.pCoin:SetAllPoints()
+    coinSet(L.pCoin, play, .5, -60)
+    L.pBottom = font(play, MORPHEUS, 20, "", INK_RED)
+    L.pBottom:SetPoint("BOTTOM", 0, 22)
+
+    -- the game's controls, in the right-hand panel under the table info
+    local acts = CreateFrame("Frame", nil, infoPanel)
+    acts:SetSize(232, 130)
+    acts:SetPoint("TOP", 0, -118)
+    L.acts = acts
+    L.aRoll = skinButton(acts, "ROLL", 232, 46, "red", function() ns.Table.rollMine() end, 24)
+    L.aRoll:SetPoint("TOP")
+    L.aClose = skinButton(acts, "Close rolls", 232, 26, "dark", function() ns.Table.closeRolls() end, 13)
+    L.aClose:SetPoint("TOP", L.aRoll, "BOTTOM", 0, -8)
+    L.aBJ = {}
+    for i, a in ipairs({ { "hit", "HIT", "red" }, { "stand", "STAND", "red" }, { "double", "DOUBLE", "gold" }, { "split", "SPLIT", "gold" } }) do
+        local b = skinButton(acts, a[2], 112, 34, a[3], function() ns.Table.act(a[1]) end, 16)
+        b:SetPoint("TOPLEFT", ((i - 1) % 2) * 120, -math.floor((i - 1) / 2) * 40)
+        L.aBJ[a[1]] = b
+    end
+    L.aPoker = CreateFrame("Frame", nil, acts)
+    L.aPoker:SetAllPoints()
+    L.aFold = skinButton(L.aPoker, "FOLD", 72, 32, "dark", function() ns.Table.act("fold") end, 14)
+    L.aFold:SetPoint("TOPLEFT")
+    L.aCall = skinButton(L.aPoker, "CHECK", 154, 32, "red", function()
+        local can = ns.Table.myActions()
+        if can then ns.Table.act(can.check and "check" or "call") end
+    end, 13)
+    L.aCall:SetPoint("TOPRIGHT")
+    L.aMinus = skinButton(L.aPoker, "-", 26, 26, "dark", function() UI.stepRaise(-1) end, 16)
+    L.aMinus:SetPoint("TOPLEFT", 0, -40)
+    L.aAmt = font(L.aPoker, FRIZ, 11, "", INK)
+    L.aAmt:SetPoint("LEFT", L.aMinus, "RIGHT", 2, 0)
+    L.aAmt:SetWidth(120)
+    L.aPlus = skinButton(L.aPoker, "+", 26, 26, "dark", function() UI.stepRaise(1) end, 16)
+    L.aPlus:SetPoint("LEFT", L.aMinus, "RIGHT", 124, 0)
+    L.aPot = skinButton(L.aPoker, "POT", 50, 26, "dark", function() UI.potRaise() end, 12)
+    L.aPot:SetPoint("TOPRIGHT", 0, -40)
+    L.aRaise = skinButton(L.aPoker, "RAISE", 112, 32, "gold", function() ns.Table.act("raise", W.raiseTo) end, 15)
+    L.aRaise:SetPoint("TOPLEFT", 0, -74)
+    L.aAllin = skinButton(L.aPoker, "ALL IN", 112, 32, "red", function() ns.Table.act("allin") end, 14)
+    L.aAllin:SetPoint("TOPRIGHT", 0, -74)
+    drawCoin(0, COIN_REST, 1)
+    -- tweens (the coin) run here while the table view, their usual driver, is hidden
+    lobby:SetScript("OnUpdate", function(self, el) if not view:IsShown() then onUpdate(self, el) end end)
 
     -- bottom: ledger
     local lh = font(lobby, MORPHEUS, 15, "OUTLINE", GOLD)
@@ -1615,40 +1884,10 @@ end
 
 function UI.hideLobby() lobby:Hide() end
 
-function UI.placeWindow()
-    local w = GambleForeverDB.settings.window
-    if not w.scale then w.scale = math.max(.35, math.min(1, UIParent:GetWidth() * .55 / 1365)) end
-    view:SetScale(w.scale)
-    view:ClearAllPoints()
-    if w.x then
-        view:SetPoint("CENTER", UIParent, "BOTTOMLEFT", w.x / w.scale, w.y / w.scale)
-    else
-        view:SetPoint("CENTER", UIParent, "CENTER", 0, 40 / w.scale)
-    end
-end
+function UI.tableShown() return view and view:IsShown() end
 
--- mode "immersive" fills the screen over a hidden UIParent; "window" is a movable panel in the normal UI
-function UI.showTable(mode)
-    if mode then
-        local win = mode == "window"
-        view:SetParent(win and UIParent or nil)
-        view:SetFrameStrata(win and "MEDIUM" or "DIALOG")
-        view:SetToplevel(win)
-        view:EnableMouse(win)
-        view:EnableMouseWheel(win)
-        for _, t in ipairs(edges) do t:SetShown(not win) end
-        W.winBg:SetShown(win)
-        W.winHint:SetShown(win)
-        for _, t in ipairs(W.winRim) do t:SetShown(win) end
-        W.keys:SetShown(not win)
-        if win then
-            view:SetSize(1365, 768)
-            UI.placeWindow()
-        else
-            view:SetScale(1)
-            view:ClearAllPoints()
-            view:SetAllPoints(WorldFrame)
-        end
+function UI.showTable(on)
+    if on then
         view:Show()
         view:SetAlpha(0)
         tween(.6, function(p) view:SetAlpha(p) end)
@@ -1664,8 +1903,10 @@ function UI.handle(what, ...)
         refresh()
         refreshLobby()
     elseif what == "event" then
+        logEvent(...)
         onEvent(...)
     elseif what == "settled" then
+        logSettled(...)
         showSettled(...)
         refreshLobby()
     elseif what == "lockdown" then

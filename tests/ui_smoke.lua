@@ -136,7 +136,9 @@ local function tick(n)
         deliver()
         local ts = timers; timers = {}
         for _, fn in ipairs(ts) do fn() end
-        if view and view.scripts.OnUpdate then for _ = 1, 4 do view.scripts.OnUpdate(view, .2) end end
+        for _, f in ipairs({ view, _G.GambleForeverLobby }) do
+            if f and f.scripts.OnUpdate then for _ = 1, 4 do f.scripts.OnUpdate(f, .2) end end
+        end
         deliver()
     end
 end
@@ -217,28 +219,42 @@ for _, g in ipairs({ "deathroll", "highlow", "coinflip", "blackjack", "poker" })
     if n < 2 then failed = failed + 1; print("  FAIL  " .. g .. " chat narrated " .. n .. " lines") end
 end
 
--- Immersive off: the table is a window that survives combat and closes on Esc (UISpecialFrames hides it)
+-- Immersive off: every game plays in the lobby window; the table view never opens
+GambleForeverDB.settings.immersive = false
+local view, lobbyFrame = _G.GambleForeverTableView, _G.GambleForeverLobby
+local function lobbyOnly()
+    if view:IsShown() then error("the table view opened with Immersive off") end
+    local c = ns.Table.current()
+    if c and c.t.phase ~= "seating" and not lobbyFrame:IsShown() then error("the lobby is not showing the game") end
+end
+for _, g in ipairs({ "deathroll", "highlow", "coinflip", "blackjack", "poker" }) do
+    play("test 3 " .. g .. " (lobby)", function()
+        lobbyOnly()
+        local can = ns.Table.myActions()
+        if ns.Table.myTurn() then ns.Table.rollMine() end
+        if can then
+            if g == "poker" then ns.UI.stepRaise(1) end
+            ns.Table.act(can.check and "check" or can.call and "call" or "stand")
+        end
+    end)
+end
 local ok, err = pcall(function()
-    GambleForeverDB.settings.immersive = false
     SlashCmdList.GAMBLEFOREVER("test 1 deathroll")
     tick()
     ns.Table.startGame()
     tick()
-    local view = _G.GambleForeverTableView
-    assert(ns.Stage.isOn() and view:IsShown(), "window did not open")
+    lobbyOnly()
     fire("PLAYER_REGEN_DISABLED")
-    assert(ns.Stage.isOn() and view:IsShown(), "window closed in combat")
-    view:Hide()   -- what CloseSpecialWindows does on Esc
-    assert(not ns.Stage.isOn(), "hiding the window did not leave the table view")
+    assert(lobbyFrame:IsShown(), "combat closed the lobby game")
+    lobbyFrame:Hide()   -- Esc or X
     SlashCmdList.GAMBLEFOREVER("table")
-    assert(ns.Stage.isOn() and view:IsShown(), "/gf table did not reopen the window")
+    assert(lobbyFrame:IsShown() and not view:IsShown(), "/gf table did not bring the lobby game back")
     ns.Table.close()
     tick()
-    assert(not view:IsShown(), "closing the table left the window up")
-    GambleForeverDB.settings.immersive = true
 end)
-if ok then passed = passed + 1; print("  ok    window mode")
-else failed = failed + 1; print("  FAIL  window mode: " .. tostring(err)) end
+GambleForeverDB.settings.immersive = true
+if ok then passed = passed + 1; print("  ok    lobby game survives combat; /gf table reopens it")
+else failed = failed + 1; print("  FAIL  lobby game: " .. tostring(err)) end
 if os.getenv("SHOW_CHAT") then for _, l in ipairs(chatLines) do print(l) end end   -- read the narration
 print(("\n%d passed, %d failed"):format(passed, failed))
 os.exit(failed == 0 and 0 or 1)

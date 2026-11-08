@@ -186,11 +186,10 @@ function ns.emit(what, ...)
         end
     elseif what == "state" then
         botTurn()
-        -- the host's Start (or Rematch) pulls everyone seated into the table view, once per round
+        -- the host's Start (or Rematch) pulls everyone seated into the game, once per round
         local c = ns.Table.current()
         if c and c.t.phase ~= "seating" and c.entered ~= c.t.round then
             c.entered = c.t.round
-            ns.UI.hideLobby()
             ns.Stage.enter()
         end
     elseif what == "enter" then
@@ -257,7 +256,6 @@ f:SetScript("OnEvent", function(_, ev, ...)
         db.settings = db.settings or {}
         if db.settings.music == nil then db.settings.music = true end
         if db.settings.immersive == nil then db.settings.immersive = true end
-        db.settings.window = db.settings.window or {}
         if db.settings.chatPlay == nil then db.settings.chatPlay = true end
         C_ChatInfo.RegisterAddonMessagePrefix(PREFIX)
         ns.Stage.restoreLeftovers()
