@@ -10,6 +10,7 @@ function ns.lockdown() return C_ChatInfo.InChatMessagingLockdown and C_ChatInfo.
 function ns.me() return myFull or UnitName("player") end
 function ns.after(sec, fn) C_Timer.After(sec, fn) end
 function ns.roll(lo, hi) RandomRoll(lo, hi) end
+function ns.now() return GetTime() end
 -- poker deck seed: secret until the hand ends
 function ns.seed()
     return ("%d-%d-%d"):format(math.random(1, 2 ^ 30), math.floor(GetTime() * 1000), math.random(1, 2 ^ 30))

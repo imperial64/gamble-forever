@@ -18,6 +18,12 @@ function Cards.make(value, suit) return (suit - 1) * 13 + (value - 2) end
 local RANK_TEXT = { [11] = "J", [12] = "Q", [13] = "K", [14] = "A" }
 function Cards.rankText(v) return RANK_TEXT[v] or tostring(v) end
 function Cards.text(id) return Cards.rankText(Cards.value(id)) .. SUIT_LETTER[Cards.suit(id)] end
+-- plain words for chat: "5 of clubs", "queen of hearts"
+local RANK_NAME = { [11] = "jack", [12] = "queen", [13] = "king", [14] = "ace" }
+function Cards.name(id)
+    local v = Cards.value(id)
+    return (RANK_NAME[v] or tostring(v)) .. " of " .. SUITS[Cards.suit(id)]
+end
 
 -- Kenney file name: card_<suit>_<A|02..10|J|Q|K>.png
 function Cards.file(id)

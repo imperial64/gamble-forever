@@ -45,6 +45,8 @@ local function party(names)
             if sec >= 3 then P.slow[#P.slow + 1] = fn else P.timers[#P.timers + 1] = fn end
         end
         ns.roll = function(lo, hi) P.pendingRoll = { name = name, lo = lo, hi = hi } end
+        P.clock = 1000
+        ns.now = function() return P.clock end
         ns.emit = function(what, ...) P.events[#P.events + 1] = { who = name, what = what, args = { ... } } end
         P.clients[name] = ns
     end
@@ -388,6 +390,21 @@ test("the host's addon flips; the loser pays the wager", function()
     local d = P.last("Talmika Waystalker", "settled").args[2]
     check(d[1].from == "Efe Imperial" and d[1].to == "Talmika Waystalker" and d[1].amount == 1234, "tails wins")
 end)
+test("a rematch waits until the other player says ready", function()
+    local P, host = seated({ "Efe Imperial", "Talmika Waystalker" }, { game = "coinflip", wager = 100, stamp = 17 })
+    local tal = P.clients["Talmika Waystalker"]
+    host.Table.startGame(); P.flush(); P.serverRoll(1)
+    local ok, waiting = host.Table.canStart()
+    check(not ok and waiting[1] == "Talmika Waystalker", "Rematch is held for Talmika")
+    host.Table.startGame(); P.flush()
+    check(host.Table.current().t.round == 1 and not P.pendingRoll, "the host cannot flip again on his own")
+    tal.Table.ready(); P.flush()
+    check(tal.Table.amReady() and host.Table.canStart(), "Talmika's Ready frees the Rematch")
+    host.Table.startGame(); P.flush()
+    check(host.Table.current().t.round == 2 and P.pendingRoll, "round 2 flips")
+    P.serverRoll(2)
+    check(not host.Table.canStart() and not tal.Table.amReady(), "and the next rematch waits again")
+end)
 
 print("Blackjack")
 -- deal by naming the card each roll must produce; the test finds the roll value for it
@@ -485,7 +502,7 @@ print("Texas Hold'em")
 test("hole cards stay private; a hand plays to showdown; everyone verifies the deal", function()
     local P, host = seated({ "Efe Imperial", "Talmika Waystalker", "Nox Aeterna" }, { game = "poker", wager = 100, maxSeats = 6, stamp = 11 })
     local tal, nox = P.clients["Talmika Waystalker"], P.clients["Nox Aeterna"]
-    host.Table.startGame(); P.flush()
+    host.Table.startGame(); P.flush(); P.serverRoll(4321)   -- the shuffle roll
     local ht = host.Table.current().t
     local tt, nt = tal.Table.current().t, nox.Table.current().t
     check(tt.myHole and tt.myHole[1] == ht.holes[2][1] and tt.myHole[2] == ht.holes[2][2], "Talmika got her two cards")
@@ -509,7 +526,7 @@ test("hole cards stay private; a hand plays to showdown; everyone verifies the d
 end)
 test("a fold ends the hand; raises reopen the action", function()
     local P, host = seated({ "Efe Imperial", "Talmika Waystalker" }, { game = "poker", wager = 100, maxSeats = 6, stamp = 12 })
-    host.Table.startGame(); P.flush()
+    host.Table.startGame(); P.flush(); P.serverRoll(4321)   -- the shuffle roll
     local t = host.Table.current().t
     check(t.sbSeat == 1 and t.toAct == 1, "heads-up: the button posts the small blind and acts first")
     host.Table.act("raise", 400); P.flush()
@@ -522,7 +539,7 @@ test("a fold ends the hand; raises reopen the action", function()
 end)
 test("all in for 100 big blinds runs the board out", function()
     local P, host = seated({ "Efe Imperial", "Talmika Waystalker" }, { game = "poker", wager = 100, maxSeats = 6, stamp = 13 })
-    host.Table.startGame(); P.flush()
+    host.Table.startGame(); P.flush(); P.serverRoll(4321)   -- the shuffle roll
     host.Table.act("allin"); P.flush()
     P.clients["Talmika Waystalker"].Table.act("call"); P.flush()
     local t = P.clients["Talmika Waystalker"].Table.current().t
@@ -530,13 +547,56 @@ test("all in for 100 big blinds runs the board out", function()
 end)
 test("a host that changes the board is caught when the seed is revealed", function()
     local P, host = seated({ "Efe Imperial", "Talmika Waystalker" }, { game = "poker", wager = 100, maxSeats = 6, stamp = 14 })
-    host.Table.startGame(); P.flush()
+    host.Table.startGame(); P.flush(); P.serverRoll(4321)   -- the shuffle roll
     local t = host.Table.current().t
     t.fullBoard[1] = (t.fullBoard[1] + 1) % 52
     host.Table.act("call"); P.flush()
     P.clients["Talmika Waystalker"].Table.act("check"); P.flush()
     for _ = 1, 3 do P.clients["Talmika Waystalker"].Table.act("check"); P.flush(); host.Table.act("check"); P.flush() end
     check(P.count("Talmika Waystalker", "mismatch") >= 1, "Talmika's addon flags the board")
+end)
+test("no cards before the shuffle roll; the roll changes the deck; a faked roll is caught", function()
+    local P, host = seated({ "Efe Imperial", "Talmika Waystalker" }, { game = "poker", wager = 100, maxSeats = 6, stamp = 16 })
+    local tal = P.clients["Talmika Waystalker"]
+    host.Table.startGame(); P.flush()
+    local t = host.Table.current().t
+    check(t.phase == "shuffle" and not t.holes and not tal.Table.current().t.myHole, "nobody has cards yet")
+    check(P.pendingRoll and P.pendingRoll.hi == host.Games.poker.SHUFFLE_ROLL, "the host rolls to shuffle")
+    check(tal.Table.current().t.commit, "the fingerprint is out before the roll")
+    local a = host.Games.poker.deal("s", 1, 2, 1)
+    local b = host.Games.poker.deal("s", 2, 2, 1)
+    check(a[1][1] ~= b[1][1] or a[1][2] ~= b[1][2] or a[2][1] ~= b[2][1], "a different roll deals different cards")
+    -- the server says 77; the host's addon pretends it was 78
+    P.roll("Talmika Waystalker", 0, 0, 0)   -- noise
+    tal.Table.onRoll("Efe Imperial", 77, 1, host.Games.poker.SHUFFLE_ROLL)
+    host.Table.onRoll("Efe Imperial", 78, 1, host.Games.poker.SHUFFLE_ROLL)
+    P.pendingRoll = nil
+    P.flush()
+    check(t.phase == "betting" and tal.Table.current().t.myHole, "cards dealt after the roll")
+    host.Table.act("fold"); P.flush()
+    check(P.count("Talmika Waystalker", "mismatch") >= 1, "Talmika's addon flags the roll it never saw")
+end)
+test("dealer-only table: the host deals, has no cards, and is not in the ledger", function()
+    local P, host = seated({ "Efe Imperial", "Talmika Waystalker", "Nox Aeterna" },
+        { game = "poker", wager = 100, maxSeats = 6, stamp = 18, dealerOnly = true })
+    local tal = P.clients["Talmika Waystalker"]
+    host.Table.startGame(); P.flush(); P.serverRoll(99)
+    local t = host.Table.current().t
+    check(t.button == 2 and t.holes[1] == nil and t.holes[2] and t.holes[3], "cards for seats 2 and 3 only")
+    check(tal.Table.current().t.dealerOnly and tal.Table.current().t.myHole, "Talmika knows it is a dealer table and has cards")
+    check(host.Table.myActions() == nil, "the host never acts")
+    P.clients[t.seats[t.toAct]].Table.act("fold"); P.flush()
+    local d = P.last("Talmika Waystalker", "settled").args[2]
+    check(#d == 1 and d[1].from ~= "Efe Imperial" and d[1].to ~= "Efe Imperial", "the dealer neither pays nor wins")
+    check(P.count("Talmika Waystalker", "mismatch") == 0 and P.count("Nox Aeterna", "mismatch") == 0, "deal verified")
+    host.Table.startGame(); P.flush(); P.serverRoll(5)
+    check(t.button == 3, "the button moves among players only")
+end)
+test("a dealer-only table needs two players besides the host", function()
+    local P, host = seated({ "Efe Imperial", "Talmika Waystalker" }, { game = "poker", wager = 100, maxSeats = 6, stamp = 19, dealerOnly = true })
+    check(not host.Table.canStart(), "one player is not a game")
+    host.Table.startGame(); P.flush()
+    check(host.Table.current().t.phase == "seating", "Start does nothing")
 end)
 
 print("Chat play")
@@ -579,11 +639,14 @@ test("a chat player joins Deathroll by typing join and is told when to roll", fu
     local t = host.Table.current().t
     check(#t.seats == 2 and t.seats[2] == "Bob Noaddon", "Bob is seated")
     check(P.saidLike("Seated %(2/2%): Efe, Bob"), "seating is narrated")
-    host.Table.startGame(); P.flush(); P.serverRoll(2)   -- Bob goes first
-    check(P.saidLike("^%[GF%] Bob, /roll 1%-1000$"), "Bob is prompted with his range")
+    host.Table.startGame(); P.flush()
+    check(P.saidLike("^%[GF%] Deathroll from 1000, wager 1g%. Efe rolls 1%-2 for who goes first: 1 Efe, 2 Bob%.$"), "the first roll is explained")
+    P.serverRoll(2)   -- Bob goes first
+    check(P.saidLike("^%[GF%] Bob goes first: /roll 1%-1000%.$"), "who starts is said, with Bob's range")
+    check(not P.saidLike("^%[GF%] Bob, /roll"), "no second prompt for the same turn")
     P.roll("Bob Noaddon", 1, 1, 1000); P.flush()
     check(P.saidLike("^%[GF%] Efe wins%. Bob pays Efe 1g%.$"), "the result is narrated")
-    check(P.saidLike("Efe rolls for who goes first") and not P.saidLike("rolls %d"), "rolls are never narrated")
+    check(not P.saidLike("rolls %d+ %("), "roll lines are never repeated")
     P.bob("join")
     check(P.saidLike("Bob, the table is") == nil, "a seated player's join is ignored")
 end)
@@ -593,6 +656,8 @@ test("Blackjack by chat: Bob sees the deal, hits, stands, and gets the result", 
     P.bob("join")
     host.Table.startGame()
     dealCards(P, host, { "10h", "6d", "6s" })
+    check(P.saidLike("^%[GF%] Roll 9: the 9th card of 312 left is the 10 of hearts %(10h%), to Bob%.$"), "each card is said in words")
+    check(P.saidLike("^%[GF%] Roll %d+: the %d+%a%a card of 311 left is the 6 of diamonds %(6d%), to the dealer%.$"), "the dealer's card too")
     check(P.saidLike("^%[GF%] Dealer shows 6d%. Bob: 10h 6s %(16%)%.$"), "the deal is narrated")
     check(P.saidLike("^%[GF%] Bob: 10h 6s %(16%) vs 6d%. hit, stand, double%?$"), "Bob is prompted")
     P.bob("hit, please")   -- talk, not a command
@@ -604,50 +669,85 @@ test("Blackjack by chat: Bob sees the deal, hits, stands, and gets the result", 
     check(P.saidLike("^%[GF%] Dealer: 6d Kh 2c %(18%)%. Bob wins 1g%. Type join to play the next round%.$"), "the result is narrated, with an invitation")
 end)
 
-test("Hold'em by chat: hole cards by whisper, prompts with amounts, raise in gold", function()
-    local P, host = chatTable({ "Efe Imperial", "Bob Noaddon" }, { game = "poker", wager = 10000, maxSeats = 6, stamp = 23 })
+test("Hold'em by chat: the host only deals; hole cards by whisper, prompts with amounts, raise in gold", function()
+    local P, host = chatTable({ "Efe Imperial", "Talmika Waystalker", "Bob Noaddon" }, { game = "poker", wager = 10000, maxSeats = 6, stamp = 23 })
+    local tal = P.clients["Talmika Waystalker"]
+    check(P.saidLike("Efe deals and does not play%."), "the table says the host only deals")
     P.bob("join")
     host.Table.startGame(); P.flush()
+    check(P.saidLike("Efe rolls 1%-10000 to shuffle"), "the shuffle roll is announced")
+    check(not P.saidLike("Your cards"), "no cards before the shuffle roll")
+    P.serverRoll(500)
     local t = host.Table.current().t
     check(P.saidLike("^%(to Bob Noaddon%) %[GF%] Your cards for hand 1: %w+ %w+$"), "Bob's cards come by whisper")
-    check(t.toAct == 1, "heads-up: Efe (button, small blind) acts first")
-    host.Table.act("raise", 40000); P.flush()
-    check(P.saidLike("^%[GF%] Efe raises to 4g%.$"), "Efe's raise is narrated")
+    check(not P.saidLike("^%(to Efe"), "nothing for the dealer")
+    check(t.toAct == 2, "heads-up: Talmika (button, small blind) acts first")
+    tal.Table.act("raise", 40000); P.flush()
+    check(P.saidLike("^%[GF%] Talmika raises to 4g%.$"), "Talmika's raise is narrated")
     check(P.saidLike("^%[GF%] Bob, pot 5g: call 3g, raise 7g or more, allin, fold%?$"), "Bob is prompted")
     P.bob("raise 10")
-    check(t.curBet == 100000 and t.toAct == 1, "Bob raised to 10g")
-    host.Table.act("call"); P.flush()
+    check(t.curBet == 100000 and t.toAct == 2, "Bob raised to 10g")
+    tal.Table.act("call"); P.flush()
     check(P.saidLike("^%[GF%] Flop: %w+ %w+ %w+%. Pot 20g%.$"), "the flop is narrated")
     P.bob("fold")
-    check(t.phase == "done" and P.saidLike("^%[GF%] Efe wins 20g, everyone else folded%."), "the result is narrated")
+    check(t.phase == "done" and P.saidLike("^%[GF%] Talmika wins 20g, everyone else folded%."), "the result is narrated")
+end)
+
+test("rules by chat, at most once a minute; the table says when it closes", function()
+    local P, host = chatTable({ "Efe Imperial", "Bob Noaddon" }, { game = "blackjack", wager = 10000, maxSeats = 6, stamp = 27 })
+    local function rules() local n = 0; for _, l in ipairs(P.said) do if l:find("^%[GF%] Blackjack: ") then n = n + 1 end end; return n end
+    P.bob("rules")
+    check(rules() == 1 and P.saidLike("5c is the 5 of clubs"), "rules posted, with the card shorthand")
+    P.bob("rules"); P.bob("help")
+    P.clock = P.clock + 30; P.bob("rules")
+    check(rules() == 1, "asking again within a minute does nothing")
+    P.clock = P.clock + 31; P.bob("help")
+    check(rules() == 2, "after a minute it answers again")
+    for _, l in ipairs(P.said) do check(#l <= 255, "rules line fits") end
+    host.Table.close(); P.flush()
+    check(P.said[#P.said]:find("^%[GF%] Table closed"), "closing is posted")
+end)
+
+test("Coinflip by chat: the rematch waits for ready", function()
+    local P, host = chatTable({ "Efe Imperial", "Bob Noaddon" }, { game = "coinflip", wager = 10000, stamp = 28 })
+    P.bob("join")
+    host.Table.startGame(); P.flush(); P.serverRoll(1)
+    check(P.saidLike("^%[GF%] Heads%. Bob pays Efe 1g%. Type ready to play again%.$"), "the result asks for ready")
+    host.Table.startGame(); P.flush()
+    check(host.Table.current().t.round == 1, "no flip until Bob is ready")
+    P.bob("ready")
+    check(P.saidLike("^%[GF%] Bob is ready%.$"), "Bob's ready is posted")
+    host.Table.startGame(); P.flush()
+    check(host.Table.current().t.round == 2, "flip 2")
 end)
 
 test("chat on with only addon players: the game is posted, nobody is prompted", function()
     local P, host = chatTable({ "Efe Imperial", "Talmika Waystalker", "Bob Noaddon" }, { game = "deathroll", wager = 10000, start = 1000, maxSeats = 3, stamp = 25 })
     local tal = P.clients["Talmika Waystalker"]
     host.Table.startGame(); P.flush(); P.serverRoll(2)   -- Talmika first
-    check(P.saidLike("^%[GF%] Deathroll from 1000") and not P.saidLike("/roll 1%-"), "start posted, no prompt for an addon player")
+    check(P.saidLike("^%[GF%] Deathroll from 1000") and P.saidLike("^%[GF%] Talmika goes first") and not P.saidLike("^%[GF%] %a+, /roll"),
+        "start and first player posted, no prompt for an addon player")
     tal.Table.rollMine(); P.serverRoll(1)
     check(P.saidLike("^%[GF%] Efe wins%. Talmika pays Efe 1g%. Type join"), "result posted, with an invitation")
 end)
 
 test("between rounds an addon player and a chat player join; the next round deals them in", function()
-    local P, host = chatTable({ "Efe Imperial", "Talmika Waystalker", "Nox Aeterna", "Bob Noaddon" }, { game = "poker", wager = 100, maxSeats = 6, stamp = 26 })
+    local P, host = chatTable({ "Efe Imperial", "Talmika Waystalker", "Kara Vell", "Nox Aeterna", "Bob Noaddon" }, { game = "poker", wager = 100, maxSeats = 6, stamp = 26 })
     local nox = P.clients["Nox Aeterna"]
     nox.Table.close(); P.flush()   -- Nox sits out the first hand
     local t = host.Table.current().t
-    check(#t.seats == 2, "two seats for hand 1")
-    host.Table.startGame(); P.flush()
+    check(#t.seats == 3, "the dealer and two players for hand 1")
+    host.Table.startGame(); P.flush(); P.serverRoll(7)
     P.bob("join")
     check(P.saidLike("^%[GF%] Bob, a round is on"), "a join mid-hand is refused, with a reason")
-    host.Table.act("fold"); P.flush()
+    P.clients[t.seats[t.toAct]].Table.act("fold"); P.flush()
     check(t.phase == "done", "hand 1 over")
     nox.Table.join(host.Table.current().tid); P.flush()
     P.bob("join")
-    check(#t.seats == 4 and t.seats[3] == "Nox Aeterna" and t.seats[4] == "Bob Noaddon", "both seated between rounds")
+    check(#t.seats == 5 and t.seats[4] == "Nox Aeterna" and t.seats[5] == "Bob Noaddon", "both seated between rounds")
     check(nox.Table.current() and nox.Table.current().t.phase == "done", "Nox is at the table, waiting")
-    check(P.saidLike("Seated %(4/6%)"), "the new seats are posted")
-    host.Table.startGame(); P.flush()
+    check(P.saidLike("Seated %(5/6%)"), "the new seats are posted")
+    host.Table.startGame(); P.flush(); P.serverRoll(8)
     local nt = nox.Table.current().t
     check(nt.round == 2 and nt.myHole and #nt.myHole == 2, "Nox gets hole cards in hand 2")
     check(P.saidLike("^%(to Bob Noaddon%) %[GF%] Your cards for hand 2"), "Bob gets his by whisper")

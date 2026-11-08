@@ -130,7 +130,7 @@ function BJ.onRoll(t, name, value, lo, hi)
     local need = t.need
     t.need = nil
     table.insert(handOf(t, need).cards, card)
-    local ev = { kind = "card", seat = need[1], hand = need[2], card = card }
+    local ev = { kind = "card", seat = need[1], hand = need[2], card = card, roll = value, of = hi }
     if t.phase == "dealing" then
         if #t.queue > 0 then
             t.need = table.remove(t.queue, 1)

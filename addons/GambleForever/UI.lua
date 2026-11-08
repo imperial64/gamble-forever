@@ -32,7 +32,7 @@ local RULES = {
     highlow = "Everyone rolls 1 to the wager at the same time. The roll counts in copper (silver or gold on very big tables; the table says which).\n\nThe lowest roller pays the highest roller the difference.\n\nTies roll again among the tied players only; the original difference still counts. If everyone rolls the same, nobody pays.",
     coinflip = "Two seats: the first is heads, the second is tails.\n\nThe host's addon flips with /roll 1-2, so the game server decides.\n\nThe loser pays the wager.",
     blackjack = "The host deals. Up to five players each play their own hand against the dealer.\n\nGoal: finish closer to 21 than the dealer without going over. 2-10 count their number, J Q K count 10, an ace counts 11 or 1.\n\nBlackjack (an ace and a 10-value card as your first two) pays 3 to 2.\n\nHit: take a card.  Stand: keep your total.\nDouble: double your bet on your first two cards and take exactly one more card.\nSplit: two cards of the same value become two hands with a bet each. Split aces get one card each.\n\nThe dealer takes one card first and the rest after every player is done, drawing to 16 and standing on 17. Over 21 is a bust and loses. A dealer blackjack beats every hand except a player blackjack. Equal totals push.\n\nThe shoe is six real decks, 312 cards. Every card the dealer's roll draws leaves the shoe; a new shoe comes in when 78 cards are left.",
-    poker = "Texas Hold'em, no limit. You get two private cards; five shared cards come face up in the middle: the flop (three), the turn (one) and the river (one). Your hand is the best five cards out of your two and the five shared ones.\n\nThe two players after the dealer button post the small and big blind. There is a betting round before the flop, after the flop, after the turn and after the river.\n\nOn your turn: Fold (give up the hand), Check (pass when there is nothing to call), Call (match the bet), Raise (bet more, at least the size of the last raise), or All in.\n\nEveryone starts each hand with 100 big blinds, and every hand settles on its own in the ledger. If everyone else folds you win without showing.\n\nFair deal: the host's addon shuffles from a secret seed and shows its fingerprint before the hand; the seed is revealed after the hand and every addon checks the deal. The host's addon does see the cards during a hand, and the revealed seed shows folded hands afterwards.",
+    poker = "Texas Hold'em, no limit. You get two private cards; five shared cards come face up in the middle: the flop (three), the turn (one) and the river (one). Your hand is the best five cards out of your two and the five shared ones.\n\nThe two players after the dealer button post the small and big blind. There is a betting round before the flop, after the flop, after the turn and after the river.\n\nOn your turn: Fold (give up the hand), Check (pass when there is nothing to call), Call (match the bet), Raise (bet more, at least the size of the last raise), or All in.\n\nEveryone starts each hand with 100 big blinds, and every hand settles on its own in the ledger. If everyone else folds you win without showing.\n\nFair deal: the host's addon picks a secret seed and shows its fingerprint, then rolls /roll 1-10000; the deck is shuffled from the seed and the roll together, so the host cannot pick the deck. The seed is revealed after the hand and every addon checks the deal. The host's addon does see the cards during a hand, and the revealed seed shows folded hands afterwards. With chat play on, chat players get their cards by whisper, so the host deals and does not play.",
 }
 
 local HAND_EXAMPLES = {
@@ -528,7 +528,7 @@ local function buildTable()
     bt:SetAllPoints()
     W.leave = skinButton(bar, "Leave table", 112, 32, "dark", function() ns.Table.close() end)
     W.leave:SetPoint("LEFT", 16, 0)
-    W.start = skinButton(bar, "Start", 104, 32, "gold", function() ns.Table.startGame() end)
+    W.start = skinButton(bar, "Start", 104, 32, "gold", function() UI.mainAction() end)
     W.start:SetPoint("LEFT", W.leave, "RIGHT", 8, 0)
     W.closeRolls = skinButton(bar, "Close rolls", 104, 32, "dark", function() ns.Table.closeRolls() end)
     W.closeRolls:SetPoint("LEFT", W.leave, "RIGHT", 8, 0)
@@ -670,8 +670,44 @@ end
 
 ---------------------------------------------------------------- per-game refresh
 
+-- The host's Start / Rematch / Next hand, or a guest's Ready where the next round needs it.
+-- Returns shown, label, enabled.
+local function mainButton(c, t)
+    local g = t.game
+    local between = t.phase == "seating" or t.phase == "done"
+    if not c.hosting then
+        if ns.Games[g].needsReady and t.phase == "done" then
+            local ready = ns.Table.amReady()
+            return true, ready and "Ready!" or "Ready", not ready
+        end
+        return false, "", false
+    end
+    local cards = g == "blackjack" or g == "poker"
+    local label = t.phase == "done" and (cards and "Next hand" or "Rematch") or "Start"
+    return between, label, ns.Table.canStart() and true or false
+end
+
+function UI.mainAction()
+    local c = ns.Table.current()
+    if not c then return end
+    if c.hosting then ns.Table.startGame() else ns.Table.ready() end
+end
+
+-- needsReady games: who the next round waits for, as a line for the status bar
+local function readyNote(c, t)
+    if not (ns.Games[t.game].needsReady and t.phase == "done") then return nil end
+    if not c.hosting then
+        return ns.Table.amReady() and ("Waiting for " .. nm(t.host) .. " to flip again.") or "Press Ready to play again."
+    end
+    local _, waiting = ns.Table.canStart()
+    if #waiting == 0 then return "Everyone is ready. Rematch?" end
+    local names = {}
+    for i, n in ipairs(waiting) do names[i] = nm(n) end
+    return "Waiting for " .. table.concat(names, ", ") .. " to press Ready (or type ready)."
+end
+
 local function waitingNote(c, t)
-    return c.hosting and (#t.seats >= ns.Games[t.game].minSeats and "Press Start when everyone is seated." or "")
+    return c.hosting and (ns.Table.canStart() and "Press Start when everyone is seated." or "")
         or "Waiting for the host to start."
 end
 
@@ -693,7 +729,7 @@ local function seatState(t, i)
         if t.turn and t.turn[1] == i then return "turn" end
     elseif t.game == "poker" then
         if t.phase == "done" and t.won and (t.won[i] or 0) > 0 then return "win" end
-        if t.inHand and t.phase ~= "seating" and not t.inHand[i] then return "out" end
+        if t.inHand and t.phase ~= "seating" and i >= ns.Games.poker.first(t) and not t.inHand[i] then return "out" end
         if t.toAct == i then return "turn" end
     end
 end
@@ -808,6 +844,7 @@ local function refreshCoinflip(c, t)
         W.status:SetText("")
     elseif t.phase == "done" and not W.flipping then
         W.cfInfo:SetText(((t.winner == 1) and "HEADS" or "TAILS") .. "  -  " .. nm(t.seats[t.winner]) .. " wins")
+        W.status:SetText(readyNote(c, t) or "")
     end
 end
 
@@ -884,7 +921,7 @@ local function refreshPoker(c, t)
         local pot = 0
         for s = 1, #t.seats do pot = pot + (t.total and t.total[s] or 0) end
         label("pot", "Pot  " .. ns.coins(pot), 0, 82, 15, GOLD)
-        for s = 1, #t.seats do
+        for s = ns.Games.poker.first(t), #t.seats do   -- a dealing host has no cards
             local ax, ay = lay.cards[s][1], lay.cards[s][2]
             local hole
             if s == mySeat then hole = t.myHole or (t.inHand[s] and { false, false })
@@ -917,6 +954,9 @@ local function refreshPoker(c, t)
     if t.phase == "seating" then
         W.cardInfo:SetText(("Waiting for players  %d / %d"):format(#t.seats, t.maxSeats))
         W.status:SetText(waitingNote(c, t))
+    elseif t.phase == "shuffle" then
+        W.cardInfo:SetText("SHUFFLING")
+        W.status:SetText(("%s rolls 1 - %d to shuffle the deck."):format(nm(t.host), ns.Games.poker.SHUFFLE_ROLL))
     elseif t.phase == "betting" then
         W.cardInfo:SetText(streetName[t.street] or "")
         local who = t.toAct and t.seats[t.toAct]
@@ -950,9 +990,10 @@ local function refreshControls(c, t, mine)
     local g = t.game
     local between = t.phase == "seating" or t.phase == "done"
     local cards = g == "blackjack" or g == "poker"
-    W.start:SetShown(c.hosting and between)
-    W.start:SetLabel(cards and (t.phase == "done" and "Next hand" or "Deal") or (t.phase == "done" and "Rematch" or "Start"))
-    W.start:SetEnabled(#t.seats >= ns.Games[g].minSeats)
+    local shown, label, enabled = mainButton(c, t)
+    W.start:SetShown(shown)
+    W.start:SetLabel(t.phase == "seating" and cards and "Deal" or label)
+    W.start:SetEnabled(enabled)
     W.closeRolls:SetShown(c.hosting and g == "highlow" and (t.phase == "rolling" or t.phase == "tie"))
     W.roll:SetShown(g == "deathroll" or g == "highlow")
     W.roll:SetEnabled(mine and not ns.lockdown())
@@ -1004,7 +1045,7 @@ local function refresh()
             local state = seatState(t, i)
             if held[i] and (state == "win" or state == "out") then state = nil end
             if s.state ~= state then s:SetState(state) end
-            s:SetNote(i == 1 and (g == "blackjack" and not t.practice and "dealer" or "host") or "")
+            s:SetNote(i == 1 and ((g == "blackjack" and not t.practice or t.dealerOnly) and "dealer" or "host") or "")
         else
             s:Hide()
         end
@@ -1230,8 +1271,9 @@ local function refreshRoom(cur)
         tableLine(t), n, t.maxSeats))
     if t.phase == "seating" then
         if cur.hosting then
-            L.roomStatus:SetText(n >= g.minSeats and "Everyone in? Start the game." or "Waiting for players to take a seat.")
-            L.roomMain:SetLabel("Start game"); L.roomMain:SetEnabled(n >= g.minSeats)
+            local ok = ns.Table.canStart()
+            L.roomStatus:SetText(ok and "Everyone in? Start the game." or "Waiting for players to take a seat.")
+            L.roomMain:SetLabel("Start game"); L.roomMain:SetEnabled(ok)
             L.roomMain:SetScript("OnClick", function() ns.Table.startGame() end)
         else
             L.roomStatus:SetText(("Waiting for %s to start."):format(nm(t.host)))
@@ -1383,6 +1425,8 @@ local function playPoker(t)
     L.pRow1:SetText(("%s   -   pot %s"):format(streetName[t.street] or "", ns.coins(pot)))
     if t.board and #t.board > 0 then cardRow("b", t.board, 0, -128, .75) end
     local me = ns.Table.mySeat()
+    local dealing = me and me < ns.Games.poker.first(t)   -- the host deals and has no hand
+    if dealing then me = nil end
     local hole = t.myHole or (me and t.inHand and t.inHand[me] and { false, false })
     local note = ""
     if hole and hole[1] and t.board and #t.board >= 3 then
@@ -1399,7 +1443,7 @@ local function playPoker(t)
     end
     local mx = (w and not iWon and t.shown[w]) and -105 or 0
     if hole then cardRow("h", hole, mx, -222, w and not iWon and .75 or .85) end
-    local mine = me and t.inHand and not t.inHand[me] and "You folded" or iWon and "You win" or "Your hand"
+    local mine = dealing and "You deal this table" or me and t.inHand and not t.inHand[me] and "You folded" or iWon and "You win" or "Your hand"
     ltext("ml", mine .. note, mx, -172, iWon and INK_RED or INK)
     local lines = {}
     if me and t.total then
@@ -1416,7 +1460,8 @@ local function playPoker(t)
     end
     setLines(lines, -278)
     local who = t.toAct and t.seats[t.toAct]
-    L.pTurn:SetText(t.phase == "betting" and who and (ns.Rolls.same(who, ns.me()) and "Your turn" or (nm(who) .. " to act"))
+    L.pTurn:SetText(t.phase == "shuffle" and ("%s rolls 1 - %d to shuffle"):format(nm(t.host), ns.Games.poker.SHUFFLE_ROLL)
+        or t.phase == "betting" and who and (ns.Rolls.same(who, ns.me()) and "Your turn" or (nm(who) .. " to act"))
         or t.phase == "done" and "Hand over" or "")
 end
 
@@ -1455,7 +1500,7 @@ local function refreshPlay(c)
         setLines(playLog.lines, -84)
     elseif g == "coinflip" then
         L.pSub:SetText(("Wager %s  -  %s is heads, %s is tails"):format(money(t, t.wager), nm(t.seats[1]), nm(t.seats[2] or "?")))
-        L.pTurn:SetText("")
+        L.pTurn:SetText(not W.flipping and readyNote(c, t) or "")
         L.pBottom:SetText(W.flipping and "Flipping..." or t.phase == "done" and t.winner
             and (((t.winner == 1) and "HEADS" or "TAILS") .. "  -  " .. nm(t.seats[t.winner]) .. " wins") or "")
         setLines({}, 0)
@@ -1486,11 +1531,11 @@ local function refreshPlay(c)
         for _, b in ipairs({ L.aMinus, L.aPlus, L.aPot, L.aRaise, L.aAllin }) do b:SetEnabled(on and can.raise or false) end
         L.aAmt:SetText(W.raiseTo and can and ("to " .. ns.coins(W.raiseTo)) or "")
     end
-    local cards = g == "blackjack" or g == "poker"
-    L.roomMain:SetShown(c.hosting and between)
-    L.roomMain:SetLabel(cards and "Next hand" or "Rematch")
-    L.roomMain:SetEnabled(#t.seats >= ns.Games[g].minSeats)
-    L.roomMain:SetScript("OnClick", function() ns.Table.startGame() end)
+    local shown, label, enabled = mainButton(c, t)
+    L.roomMain:SetShown(shown)
+    L.roomMain:SetLabel(label)
+    L.roomMain:SetEnabled(enabled)
+    L.roomMain:SetScript("OnClick", function() UI.mainAction() end)
 end
 
 local function refreshLobby()

@@ -2,7 +2,7 @@
 -- applies the server's /roll lines itself with the same rules, so a host cannot invent results.
 --
 -- Pure apart from hooks Core sets: ns.send(msg), ns.whisper(name, msg), ns.me(), ns.roll(lo, hi),
--- ns.after(sec, fn), ns.seed(). ns.emit(what, ...) tells the UI what happened:
+-- ns.after(sec, fn), ns.seed(), ns.now() (seconds). ns.emit(what, ...) tells the UI what happened:
 --   "enter" "leave" "closed" "state" "lobby" "event"(ev) "settled"(t, debts) "mismatch"(what)
 --
 -- Message: "2;<tableId>;<seq>;<EVT>;<payload>", at most 255 bytes
@@ -12,6 +12,7 @@
 --   P     host -> one      private game data (poker hole cards), by whisper
 --   CLOSE host -> group    table closed
 --   SIT / LEAVE / ACT      player -> group, acted on by the host (ACT = action;amount)
+--   READY                  player -> group, agrees to the next round (Coinflip rematch)
 --   WHO   anyone -> group  hosts answer with OPEN
 local _, ns = ...
 local T = { lobby = {} }
@@ -19,6 +20,7 @@ ns.Table = T
 local VERSION = "2"
 local BATCH = .3
 local CHUNK = 200
+T.RULES_COOLDOWN = 60   -- seconds between "rules" answers in chat
 
 local function split(s, sep)
     local out = {}
@@ -158,7 +160,25 @@ local function hostAuto(c)
     end)
 end
 
+-- Private game data (poker hole cards), once per round as soon as the game has it: by addon
+-- whisper to addon players, in plain words to chat players.
+local function sendPrivate(c)
+    local t = c.t
+    local list = game(t).privateFor and c.privRound ~= t.round and game(t).privateFor(t)
+    if not list then return end
+    c.privRound = t.round
+    for _, p in ipairs(list) do
+        local name = t.seats[p.seat]
+        if ns.Rolls.same(name, ns.me()) then game(t).onPrivate(t, p.payload)
+        else
+            if not (ns.bots and ns.bots[name]) then ns.whisper(name, T.pack(c.tid, 0, "P", p.payload)) end
+            if c.chatters[name] then ns.sayTo(name, ns.Chat.holeLine(t, p.seat)) end
+        end
+    end
+end
+
 local function hostChanged(c, ev, rosterChanged)
+    sendPrivate(c)
     if ev then emit("event", ev) end
     broadcast(rosterChanged)
     emit("state")
@@ -172,14 +192,17 @@ end
 function T.open(opts)
     local me = ns.me()
     local g = ns.Games[opts.game]
+    -- chat players get their poker cards as whispers the host can read: the host only deals
+    if opts.chat and opts.game == "poker" then opts.dealerOnly = true end
     local t = { game = opts.game, host = me, wager = opts.wager,
         maxSeats = math.max(g.minSeats, math.min(opts.maxSeats or g.maxSeats, g.maxSeats)),
         chips = opts.chips and true or false, seats = { me }, phase = "seating", round = 0, rosterVer = 0 }
     g.setup(t, opts)
     local short = me:match("^[^ %-]+")
     -- chatters: seats taken by typing "join" in party/raid chat (Chat.lua narrates for them)
+    -- ready: players who agreed to the next round (games with needsReady)
     T.cur = { tid = short:sub(1, 6) .. ((opts.stamp or 0) % 100000), host = me, seq = 0, t = t, hosting = true,
-        chat = opts.chat and true or false, chatters = {} }
+        chat = opts.chat and true or false, chatters = {}, ready = {} }
     broadcast(true)
     emit("enter")
     emit("state")
@@ -195,24 +218,54 @@ function T.addBot(name, asChatter)
     broadcast(true); emit("state")
 end
 
-function T.startGame()
+-- Host: may the next round start? false and the names still to say ready (needsReady games).
+function T.canStart()
     local c = T.cur
-    if not (c and c.hosting) then return end
+    if not (c and c.hosting) then return false, {} end
     local t = c.t
-    if #t.seats < game(t).minSeats or (t.phase ~= "seating" and t.phase ~= "done") then return end
-    game(t).start(t, ns.seed and ns.seed() or tostring(t.round))
-    T.seen = {}
-    if game(t).privateFor then
-        for _, p in ipairs(game(t).privateFor(t)) do
-            local name = t.seats[p.seat]
-            if ns.Rolls.same(name, ns.me()) then game(t).onPrivate(t, p.payload)
-            else
-                if not (ns.bots and ns.bots[name]) then ns.whisper(name, T.pack(c.tid, 0, "P", p.payload)) end
-                if c.chatters[name] then ns.sayTo(name, ns.Chat.holeLine(t, p.seat)) end
-            end
+    if t.phase ~= "seating" and t.phase ~= "done" then return false, {} end
+    if #t.seats < game(t).minSeats + (t.dealerOnly and 1 or 0) then return false, {} end
+    local waiting = {}
+    if game(t).needsReady then
+        for i = 2, #t.seats do
+            local name = t.seats[i]
+            if not (c.ready[name] or (ns.bots and ns.bots[name])) then waiting[#waiting + 1] = name end
         end
     end
+    return #waiting == 0, waiting
+end
+
+function T.startGame()
+    local c = T.cur
+    if not T.canStart() then return end
+    local t = c.t
+    game(t).start(t, ns.seed and ns.seed() or tostring(t.round))
+    c.ready = {}
+    T.seen = {}
     hostChanged(c)
+end
+
+-- A player agrees to the next round (Coinflip rematch). Sitting down counts for the first.
+local function markReady(c, name)
+    local t = c.t
+    if c.ready[name] or t.phase ~= "done" or not seatOf(t, name) then return end
+    c.ready[name] = true
+    if c.chat then ns.say(("[GF] %s is ready."):format(name:match("^[^ %-]+"))) end
+    emit("state")
+end
+
+function T.ready()
+    local c = T.cur
+    if not c or c.hosting or c.readyRound == c.t.round then return end
+    c.readyRound = c.t.round
+    ns.send(T.pack(c.tid, 0, "READY"))
+    emit("state")
+end
+
+-- A guest: have I said ready for the round that just ended?
+function T.amReady()
+    local c = T.cur
+    return c ~= nil and c.readyRound == c.t.round
 end
 
 -- High-Low: stop waiting for players who have not rolled
@@ -235,6 +288,7 @@ function T.close()
     if not c then return end
     if c.hosting then
         ns.send(T.pack(c.tid, c.seq + 1, "CLOSE"))
+        if c.chat then ns.say(nil, "prompt"); ns.say("[GF] Table closed. Thanks for playing.") end
     else
         ns.send(T.pack(c.tid, 0, "LEAVE"))
     end
@@ -302,6 +356,7 @@ local function hostIntent(c, evt, sender, payload)
         -- before the first start, or between rounds (the next Start or Rematch deals them in)
         if (t.phase == "seating" or t.phase == "done") and #t.seats < t.maxSeats and not seatOf(t, sender) then
             t.seats[#t.seats + 1] = sender
+            c.ready[sender] = true
             hostChanged(c, nil, true)
         else
             c.rosterDirty = true   -- resend the roster so the sender learns where things stand
@@ -324,6 +379,8 @@ local function hostIntent(c, evt, sender, payload)
         local seat = seatOf(t, sender)
         local f = split(payload, ";")
         if seat then T.hostAct(seat, f[1], tonumber(f[2])) end
+    elseif evt == "READY" then
+        markReady(c, sender)
     end
 end
 
@@ -461,6 +518,14 @@ function T.chatCommand(sender, text)
         hostIntent(c, "SIT", sender)
     elseif action == "leave" then
         hostIntent(c, "LEAVE", sender)
+    elseif action == "ready" then
+        markReady(c, sender)
+    elseif action == "rules" then
+        -- anyone may ask, once a minute per table, so it cannot flood the channel
+        local now = ns.now()
+        if c.rulesAt and now - c.rulesAt < T.RULES_COOLDOWN then return end
+        c.rulesAt = now
+        for _, l in ipairs(ns.Chat.fit(ns.Chat.rulesLine(t))) do ns.say(l) end
     else
         local seat = seatOf(t, sender)
         if seat then T.hostAct(seat, action, amount) end

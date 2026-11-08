@@ -320,7 +320,9 @@ end
 
 -- Two seats: seat 1 is heads (1), seat 2 is tails (2). The host's addon flips with /roll 1-2;
 -- the server decides, so the host flipping cannot favour anyone.
-local Coinflip = { name = "Coinflip", minSeats = 2, maxSeats = 2 }
+-- The other seat does nothing during a flip, so every flip after the first needs them to say
+-- ready (sitting down counts for the first); otherwise the host could flip again and again.
+local Coinflip = { name = "Coinflip", minSeats = 2, maxSeats = 2, needsReady = true }
 Games.coinflip = Coinflip
 
 function Coinflip.setup() end

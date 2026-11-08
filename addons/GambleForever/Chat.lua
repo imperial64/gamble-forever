@@ -10,7 +10,7 @@ ns.Chat = Chat
 
 local WORDS = { join = "join", sit = "join", leave = "leave", hit = "hit", stand = "stand", stay = "stand",
     double = "double", split = "split", fold = "fold", check = "check", call = "call", raise = "raise",
-    bet = "raise", allin = "allin" }
+    bet = "raise", allin = "allin", ready = "ready", rules = "rules", help = "rules" }
 local UNIT = { g = 10000, s = 100, c = 1 }
 
 -- "500" is gold; "50s", "1g 50s" and "2550c" spell the coins out. Copper, or nil.
@@ -80,8 +80,22 @@ end
 local STAKE = { deathroll = "wager", highlow = "wager", coinflip = "wager", blackjack = "bet", poker = "big blind" }
 
 function Chat.openLine(t)
-    return ("[GF] %s table open, %s %s. Type join to sit, leave to get up. Only the host's addon judges this table.")
-        :format(ns.Games[t.game].name, STAKE[t.game], Chat.money(t.wager))
+    return ("[GF] %s table open, %s %s.%s Type join to sit, leave to get up, rules for how to play. Only the host's addon judges this table.")
+        :format(ns.Games[t.game].name, STAKE[t.game], Chat.money(t.wager),
+            t.dealerOnly and (" " .. nm(t.host) .. " deals and does not play.") or "")
+end
+
+local CARD_NAMES = "Cards are written short: 5c is the 5 of clubs, Qh the queen of hearts (h hearts, d diamonds, c clubs, s spades; J Q K A = jack queen king ace)."
+local RULES = {
+    deathroll = function(t) return ("Deathroll: players take turns to /roll. The first roll is 1-%d, every roll after that is 1 to the last result. Roll a 1 and you are out and pay the wager; the last one standing wins. The host's addon rolls to pick who goes first."):format(t.start) end,
+    highlow = function(t) return ("High-Low: everyone types /roll 1-%d at once. The lowest roll pays the highest roll the difference%s. Ties roll again among the tied players."):format(t.range, t.unit > 1 and (", 1 point = " .. Chat.money(t.unit)) or " in copper") end,
+    coinflip = function(t) return ("Coinflip: the host's addon types /roll 1-2. 1 is heads, %s wins; 2 is tails, %s wins. The loser pays the wager. After a flip, both players type ready for another."):format(nm(t.seats[1]), nm(t.seats[2] or "seat 2")) end,
+    blackjack = function() return "Blackjack: the dealer's addon types /roll 1-N for every card, where N is the cards left in a 6-deck shoe; the roll picks that card. Get closer to 21 than the dealer without going over: 2-10 count their number, J Q K count 10, an ace 11 or 1. Blackjack pays 3:2, the dealer stands on 17. On your turn type hit, stand, double or split. " .. CARD_NAMES end,
+    poker = function() return "Hold'em, no limit, everyone starts each hand with 100 big blinds. The host's addon fixes a secret seed, shows its fingerprint, then types /roll 1-10000; the deck is shuffled from both, and the seed is shown after the hand so addon users can check it. Your two cards come by whisper. On your turn type check, call, raise N (N in gold, or 50s), allin or fold. " .. CARD_NAMES end,
+}
+
+function Chat.rulesLine(t)
+    return "[GF] " .. RULES[t.game](t) .. " Type join to sit, leave to get up."
 end
 
 function Chat.seatsLine(t)
@@ -97,15 +111,19 @@ end
 local function startLine(t)
     local m = Chat.money(t.wager)
     if t.game == "deathroll" then
-        return ("[GF] Deathroll from %d, wager %s. %s rolls for who goes first."):format(t.start, m, nm(t.host))
+        local who = {}
+        for i, n in ipairs(t.seats) do who[i] = i .. " " .. nm(n) end
+        return ("[GF] Deathroll from %d, wager %s. %s rolls 1-%d for who goes first: %s.")
+            :format(t.start, m, nm(t.host), #t.seats, table.concat(who, ", "))
     elseif t.game == "highlow" then
         return ("[GF] High-Low, wager %s: everyone /roll 1-%d now. Lowest pays highest the difference%s.")
             :format(m, t.range, t.unit > 1 and (" (1 point = " .. Chat.money(t.unit) .. ")") or "")
     elseif t.game == "coinflip" then
-        return ("[GF] Coinflip for %s: %s heads, %s tails."):format(m, nm(t.seats[1]), nm(t.seats[2]))
+        return ("[GF] Coinflip for %s: %s rolls 1-2. 1 is heads, %s wins; 2 is tails, %s wins.")
+            :format(m, nm(t.host), nm(t.seats[1]), nm(t.seats[2]))
     elseif t.game == "poker" then
-        return ("[GF] Hold'em hand %d, blinds %s/%s, %s on the button. Chat players get their cards by whisper.")
-            :format(t.round, Chat.money(t.sb), Chat.money(t.bb), nm(t.seats[t.button]))
+        return ("[GF] Hold'em hand %d, blinds %s/%s, %s on the button. %s rolls 1-%d to shuffle; chat players get their cards by whisper.")
+            :format(t.round, Chat.money(t.sb), Chat.money(t.bb), nm(t.seats[t.button]), nm(t.host), ns.Games.poker.SHUFFLE_ROLL)
     end
 end
 
@@ -134,20 +152,36 @@ local function pot(t)
 end
 
 local POKER_ACT = { fold = "folds", check = "checks", call = "calls" }
+local function ordinal(n)
+    local tens, last = n % 100, n % 10
+    local suf = (tens >= 11 and tens <= 13) and "th" or last == 1 and "st" or last == 2 and "nd" or last == 3 and "rd" or "th"
+    return n .. suf
+end
+
 local function eventLine(c, t, ev)
-    if t.game == "highlow" then
+    if t.game == "deathroll" then
+        if ev.kind == "first" then
+            c.saidPrompt = table.concat({ t.round, #t.history, t.turn }, ":")   -- this line is the first prompt
+            return ("[GF] %s goes first: /roll 1-%d."):format(nm(t.seats[ev.seat]), t.cur)
+        elseif ev.kind == "out" then
+            return ("[GF] %s rolled a 1 and is out. %s rolls next, 1-%d."):format(nm(t.seats[ev.seat]), nm(t.seats[t.turn]), t.cur)
+        end
+    elseif t.game == "highlow" then
         local e = ev.next or ev
         if e.kind == "tie" then
             local names = {}
             for _, s in ipairs(e.seats) do names[#names + 1] = nm(t.seats[s]) end
             return ("[GF] Tie for %s: %s. /roll 1-%d again."):format(e.side == "hi" and "high" or "low", list(names), t.range)
         end
-    elseif t.game == "blackjack" then
+    elseif t.game == "blackjack" and ev.kind == "card" then
+        -- every card in words, so the roll line above it and the short names later make sense
+        local to = ev.seat == 0 and "the dealer" or bjName(t, ev.seat, ev.hand)
+        local line = ("[GF] Roll %d: the %s card of %d left is the %s (%s), to %s.")
+            :format(ev.roll, ordinal(ev.roll), ev.of, C.name(ev.card), C.text(ev.card), to)
         -- a hit that ends the hand; while the hand goes on, the prompt shows the new card
-        local hd = ev.kind == "card" and ev.seat > 0 and c.saidDeal == t.round and t.hands[ev.seat][ev.hand]
-        if hd and hd.done and c.chatters[t.seats[ev.seat]] then
-            return "[GF] " .. bjName(t, ev.seat, ev.hand) .. ": " .. bjHand(hd) .. "."
-        end
+        local hd = ev.seat > 0 and c.saidDeal == t.round and t.hands[ev.seat][ev.hand]
+        if hd and hd.done then line = line .. " " .. bjName(t, ev.seat, ev.hand) .. ": " .. bjHand(hd) .. "." end
+        return line
     elseif t.game == "poker" and ev.kind == "act" then
         local what = POKER_ACT[ev.action]
             or ev.action == "raise" and ("raises to " .. Chat.money(ev.amount))
@@ -261,7 +295,9 @@ function Chat.hostChanged(c, ev)
     end
     if t.phase == "done" and c.saidDone ~= t.round then
         c.saidDone = t.round
-        say(resultLine(t) .. (#t.seats < t.maxSeats and " Type join to play the next round." or ""))
+        local invite = ns.Games[t.game].needsReady and " Type ready to play again."
+            or #t.seats < t.maxSeats and " Type join to play the next round." or ""
+        say(resultLine(t) .. invite)
     end
     local p, key = prompt(c, t)
     if p and key ~= c.saidPrompt then c.saidPrompt = key; say(p, "prompt")
