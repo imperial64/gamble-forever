@@ -1334,30 +1334,36 @@ local function playBlackjack(t)
     else
         L.pRow1:SetText("Dealer")
     end
-    -- every player's hands side by side under the dealer; a split hand sits under the first
+    -- every player's hands under the dealer, up to three to a row; split hands share the column
     local first = BJ.first(t)
     local n = #t.seats - first + 1
-    local colW = math.min(200, 400 / math.max(1, n))
+    local perRow = math.min(3, n)
+    local colW = n <= 2 and 200 or 133
     local scale = n <= 2 and .7 or .55
+    local cw = CARD_W * scale
     for s = first, #t.seats do
-        local cx = (s - first + 1 - (n + 1) / 2) * colW
+        local k = s - first               -- 0-based player index
+        local row, inRow = math.floor(k / 3), math.min(perRow, n - math.floor(k / 3) * 3)
+        local cx = (k % 3 + 1 - (inRow + 1) / 2) * colW
+        local top = -170 - row * 88
         local onTurn = t.turn and t.turn[1] == s
         local who = ns.Rolls.same(t.seats[s], ns.me()) and "You" or nm(t.seats[s])
-        ltext("n" .. s, who, cx, -172, onTurn and INK_RED or INK)
-        for h, hand in ipairs(t.hands and t.hands[s] or {}) do
-            local y = -205 - (h - 1) * 78
-            local cw = CARD_W * scale
-            local step = math.max(8, math.min(cw + 4, (colW - cw - 6) / math.max(1, #hand.cards - 1)))
+        ltext("n" .. s, who, cx, top, onTurn and INK_RED or INK)
+        local hands = t.hands and t.hands[s] or {}
+        local handW = colW / math.max(1, #hands)
+        for h, hand in ipairs(hands) do
+            local hx, y = cx + (h - (#hands + 1) / 2) * handW, top - 30
+            local step = math.max(8, math.min(cw + 4, (handW - cw - 8) / math.max(1, #hand.cards - 1)))
             for i, card in ipairs(hand.cards) do
-                lcard(("p%d.%d.%d"):format(s, h, i), card, cx + (i - (#hand.cards + 1) / 2) * step, y, scale)
+                lcard(("p%d.%d.%d"):format(s, h, i), card, hx + (i - (#hand.cards + 1) / 2) * step, y, scale)
             end
             if #hand.cards > 0 then
                 local active = onTurn and t.turn[2] == h
-                ltext(("t%d.%d"):format(s, h), handLabel(hand), cx, y - 31, active and INK_RED or INK)
+                ltext(("t%d.%d"):format(s, h), handLabel(hand), hx, y - 31, active and INK_RED or INK)
                 local r = t.outcome and t.outcome[s] and t.outcome[s][h]
                 if r then
                     ltext(("o%d.%d"):format(s, h), r > 0 and ("|cff1f7a1f+" .. ns.coins(r) .. "|r")
-                        or r < 0 and ("|cff8a1a08-" .. ns.coins(-r) .. "|r") or "push", cx, y - 43)
+                        or r < 0 and ("|cff8a1a08-" .. ns.coins(-r) .. "|r") or "push", hx, y - 43)
                 end
             end
         end
