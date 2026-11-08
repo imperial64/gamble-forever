@@ -378,8 +378,63 @@ local function ledgerText()
     return #parts > 0 and table.concat(parts, "      ") or "|cff9a8a66Nothing owed. Trades with players on the ledger are marked paid automatically.|r"
 end
 
+-- Waiting room: the seats of the table I host or sit at, shown in the lobby window while the
+-- normal UI and chat stay up. The host's Start pulls everyone into the table view.
+local function classColor(name)
+    local u = ns.Scene.unitFor(name)
+    local class = u and select(2, UnitClass(u))
+    local c = class and RAID_CLASS_COLORS and RAID_CLASS_COLORS[class]
+    return c and c.r or INK[1], c and c.g or INK[2], c and c.b or INK[3]
+end
+
+local function refreshRoom(cur)
+    local t = cur.t
+    local g = ns.Games[t.game]
+    L.roomTitle:SetText(("%s's %s table"):format(first(t.host), g and g.name or t.game))
+    for i, row in ipairs(L.seatRows) do
+        local name = t.seats[i]
+        if i <= t.maxSeats then
+            row:Show()
+            row.num:SetText(i)
+            if name then
+                row.name:SetText(first(name)); row.name:SetTextColor(classColor(name))
+                row.tag:SetText(i == 1 and "host" or (ns.bots[name] and "practice bot") or (ns.Rolls.same(name, ns.me()) and "you") or "")
+            else
+                row.name:SetText("open seat"); row.name:SetTextColor(.5, .42, .3)
+                row.tag:SetText("")
+            end
+        else
+            row:Hide()
+        end
+    end
+    local n = #t.seats
+    L.roomInfo:SetText(("Wager  %s%s\nStart number  %d\nSeats  %d / %d"):format(ns.coins(t.wager),
+        t.chips and "  (chips)" or "", t.start, n, t.maxSeats))
+    local seating = t.phase == "seating"
+    if seating then
+        if cur.hosting then
+            L.roomStatus:SetText(n >= (g.minSeats or 2) and "Everyone in? Start the game." or "Waiting for players to take a seat.")
+            L.roomMain:SetLabel("Start game"); L.roomMain:SetEnabled(n >= (g.minSeats or 2))
+            L.roomMain:SetScript("OnClick", function() ns.Table.startGame() end)
+        else
+            L.roomStatus:SetText(("Waiting for %s to start."):format(first(t.host)))
+            L.roomMain:SetLabel("Waiting..."); L.roomMain:SetEnabled(false)
+        end
+    else
+        L.roomStatus:SetText("The game is under way.")
+        L.roomMain:SetLabel("Return to table"); L.roomMain:SetEnabled(true)
+        L.roomMain:SetScript("OnClick", function() ns.Stage.enter(); lobby:Hide() end)
+    end
+    L.roomLeave:SetLabel(cur.hosting and "Close table" or "Leave table")
+end
+
 local function refreshLobby()
     if not lobby then return end
+    local cur = ns.Table.current()
+    for _, p in ipairs(L.browse) do p:SetShown(not cur) end
+    for _, p in ipairs(L.room) do p:SetShown(cur ~= nil) end
+    L.ledger:SetText(ledgerText())
+    if cur then refreshRoom(cur); return end
     local list = {}
     for _, e in pairs(ns.Table.lobby) do list[#list + 1] = e end
     table.sort(list, function(a, b) return a.tid < b.tid end)
@@ -391,22 +446,14 @@ local function refreshLobby()
             row.host:SetText(first(e.host))
             row.info:SetText(("%s  -  %s%s  -  %d / %d seats"):format(g and g.name or e.game,
                 ns.coins(e.wager), e.chips and " chips" or "", e.seated, e.maxSeats))
-            if cur and cur.tid == e.tid then
-                row.btn:SetLabel("Return"); row.btn:SetStyle("gold")
-                row.btn:SetScript("OnClick", function() ns.Stage.enter(); lobby:Hide() end)
-                row.btn:SetEnabled(true)
-            else
-                row.btn:SetLabel("Take seat"); row.btn:SetStyle("red")
-                row.btn:SetScript("OnClick", function() ns.Table.join(e.tid); lobby:Hide() end)
-                row.btn:SetEnabled(not cur and e.seated < e.maxSeats)
-            end
+            row.btn:SetScript("OnClick", function() ns.Table.join(e.tid) end)
+            row.btn:SetEnabled(e.seated < e.maxSeats)
             row:Show()
         else
             row:Hide()
         end
     end
     L.empty:SetShown(#list == 0)
-    L.ledger:SetText(ledgerText())
     L.chips:SetOn(L.chips.on)
     L.immersive:SetOn(DeathrollDB.settings.immersive)
 end
@@ -510,7 +557,7 @@ local function buildLobby()
     L.empty:SetPoint("TOP", 0, -110)
     L.empty:SetWidth(330)
     L.empty:SetText("No open tables yet.\n\nOpen one on the right, or ask the host to invite you to their group.")
-    local practice = skinButton(left, "Practice vs bot", 140, 28, "dark", function() SlashCmdList.DEATHROLL("test 1"); lobby:Hide() end, 13)
+    local practice = skinButton(left, "Practice vs bot", 140, 28, "dark", function() SlashCmdList.DEATHROLL("test 1") end, 13)
     practice:SetPoint("BOTTOMLEFT", 16, 14)
     local refreshBtn = skinButton(left, "Refresh", 100, 28, "dark", function() ns.Table.who(); refreshLobby() end, 13)
     refreshBtn:SetPoint("BOTTOMRIGHT", -16, 14)
@@ -558,9 +605,58 @@ local function buildLobby()
         if wager < 1 then print("|cffffd100Deathroll|r set a wager of at least 1 copper."); return end
         ns.Table.open({ game = "deathroll", wager = wager,
             start = tonumber(L.start:GetText()) or 1000, maxSeats = seatsN, chips = L.chips.on, stamp = time() })
-        lobby:Hide()
     end, 18)
     open:SetPoint("BOTTOM", 0, 14)
+    L.browse = { left, right }
+
+    -- waiting room (replaces the two browse panels while I host or sit at a table)
+    local seatsPanel = panel(30, -52, 417, 350)
+    L.roomTitle = font(seatsPanel, MORPHEUS, 22, "", INK_RED)
+    L.roomTitle:SetPoint("TOP", 0, -12)
+    local rs = font(seatsPanel, FRIZ, 10, "", INK)
+    rs:SetPoint("TOP", L.roomTitle, "BOTTOM", 0, -2)
+    rs:SetText("SEATS")
+    L.seatRows = {}
+    for i = 1, 6 do
+        local row = CreateFrame("Frame", nil, seatsPanel)
+        row:SetSize(360, 40)
+        row:SetPoint("TOP", 0, -58 - (i - 1) * 44)
+        local disc = row:CreateTexture(nil, "ARTWORK")
+        disc:SetTexture(art("btn_dark"))
+        disc:SetSize(34, 34)
+        disc:SetPoint("LEFT")
+        row.num = font(row, MORPHEUS, 16, "", { 1, .9, .62 })
+        row.num:SetPoint("CENTER", disc, "CENTER", 0, 1)
+        row.name = font(row, MORPHEUS, 18, "")
+        row.name:SetPoint("LEFT", disc, "RIGHT", 12, 0)
+        row.tag = font(row, FRIZ, 11, "", INK_RED)
+        row.tag:SetPoint("RIGHT", -6, 0)
+        local line = row:CreateTexture(nil, "BACKGROUND")
+        line:SetColorTexture(.45, .3, .12, .35)
+        line:SetHeight(1)
+        line:SetPoint("BOTTOMLEFT", 0, -2); line:SetPoint("BOTTOMRIGHT", 0, -2)
+        L.seatRows[i] = row
+    end
+
+    local infoPanel = panel(474, -52, 264, 350)
+    local ih = font(infoPanel, MORPHEUS, 22, "", INK_RED)
+    ih:SetPoint("TOP", 0, -12)
+    ih:SetText("Table")
+    L.roomInfo = font(infoPanel, FRIZ, 13, "", INK)
+    L.roomInfo:SetPoint("TOP", 0, -52)
+    L.roomInfo:SetSpacing(8)
+    L.roomStatus = font(infoPanel, FRIZ, 12, "", INK_RED)
+    L.roomStatus:SetPoint("TOP", 0, -150)
+    L.roomStatus:SetWidth(230)
+    local chatHint = font(infoPanel, FRIZ, 10, "", INK)
+    chatHint:SetPoint("TOP", L.roomStatus, "BOTTOM", 0, -10)
+    chatHint:SetWidth(230)
+    chatHint:SetText("Chat stays open until the host starts.\nEveryone seated moves to the table together.")
+    L.roomMain = skinButton(infoPanel, "Start game", 232, 36, "gold", nil, 18)
+    L.roomMain:SetPoint("BOTTOM", 0, 52)
+    L.roomLeave = skinButton(infoPanel, "Leave table", 232, 28, "dark", function() ns.Table.close() end, 14)
+    L.roomLeave:SetPoint("BOTTOM", 0, 16)
+    L.room = { seatsPanel, infoPanel }
 
     -- bottom: ledger
     local lh = font(lobby, MORPHEUS, 15, "OUTLINE", GOLD)
@@ -610,6 +706,13 @@ function UI.toggleLobby()
     if lobby:IsShown() then lobby:Hide() else lobby:Show() end
 end
 
+function UI.showRoom()
+    if not lobby:IsShown() then lobby:Show() end
+    refreshLobby()
+end
+
+function UI.hideLobby() lobby:Hide() end
+
 function UI.tableShown() return view and view:IsShown() end
 
 function UI.showTable(on)
@@ -627,7 +730,7 @@ end
 function UI.handle(what, ...)
     if what == "state" or what == "roster" then
         refresh()
-        if what == "roster" then refreshLobby() end
+        refreshLobby()
     elseif what == "event" then
         onEvent(...)
     elseif what == "settled" then

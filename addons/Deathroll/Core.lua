@@ -87,8 +87,15 @@ function ns.emit(what, ...)
         end
     elseif what == "state" then
         botTurn()
+        -- the host's Start (or Rematch) pulls everyone seated into the table view, once per round
+        local c = ns.Table.current()
+        if c and c.t.phase ~= "seating" and c.entered ~= c.t.round then
+            c.entered = c.t.round
+            ns.UI.hideLobby()
+            ns.Stage.enter()
+        end
     elseif what == "enter" then
-        ns.Stage.enter()
+        ns.UI.showRoom()   -- opening or joining a table lands in the waiting room
     elseif what == "leave" or what == "closed" then
         wipe(ns.bots)
         ns.Stage.leave(what)
