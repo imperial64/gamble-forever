@@ -9,6 +9,13 @@ foreach ($f in Get-ChildItem $src -Filter *.lua) {
     luajit -bl $f.FullName | Out-Null
     if ($LASTEXITCODE -ne 0) { Write-Error "Lua syntax error in $($f.Name) - not installing." }
 }
+# Forever draws palette PNGs below 8 bits as solid green: only 8-bit RGB (2) or RGBA (6) ship.
+foreach ($p in Get-ChildItem $src -Recurse -Filter *.png) {
+    $b = [IO.File]::ReadAllBytes($p.FullName)
+    if ($b[24] -ne 8 -or ($b[25] -ne 2 -and $b[25] -ne 6)) {
+        Write-Error "$($p.Name) is not 8-bit RGB/RGBA - run python scripts/fix-png.py. Not installing."
+    }
+}
 Push-Location $repo
 luajit tests/run.lua | Select-Object -Last 1
 $rules = $LASTEXITCODE

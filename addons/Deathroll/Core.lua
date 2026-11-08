@@ -35,8 +35,9 @@ end
 
 ---------------------------------------------------------------- sending
 
--- Group channel; a whisper to myself when solo (test tables). A send the client refuses
--- (throttle, chat lockdown) is retried each second for a while instead of being lost.
+-- Group channel. Solo (practice tables) a message is handed straight back to me: Forever answers
+-- an addon whisper to my own name with "No player named 'Efe' is currently playing" for every send.
+-- A send the client refuses (throttle, chat lockdown) is retried each second for a while.
 local queue, ticking = {}, false
 local function channel()
     if IsInRaid() then return "RAID" elseif IsInGroup() then return "PARTY" end
@@ -57,15 +58,19 @@ local function pump()
     while #queue > 0 do
         local m = queue[1]
         local ch, target = channel(), nil
-        if m.to then ch, target = "WHISPER", whisperTarget(m.to)
-        elseif not ch then ch, target = "WHISPER", UnitName("player") end
-        local res = C_ChatInfo.SendAddonMessage(PREFIX, m.msg, ch, target)
-        if res ~= nil and res ~= 0 and res ~= true then
-            m.tries = m.tries + 1
-            if m.tries > 30 then table.remove(queue, 1) end
-            ticking = true
-            C_Timer.After(1, pump)
-            return
+        if m.to then ch, target = "WHISPER", whisperTarget(m.to) end
+        if not ch then
+            local msg = m.msg
+            C_Timer.After(0, function() ns.Table.onMessage(msg, ns.me()) end)
+        else
+            local res = C_ChatInfo.SendAddonMessage(PREFIX, m.msg, ch, target)
+            if res ~= nil and res ~= 0 and res ~= true then
+                m.tries = m.tries + 1
+                if m.tries > 30 then table.remove(queue, 1) end
+                ticking = true
+                C_Timer.After(1, pump)
+                return
+            end
         end
         table.remove(queue, 1)
     end
@@ -265,8 +270,10 @@ SlashCmdList.DEATHROLL = function(m)
         if ns.Table.current() then ns.Table.close() end
         local gameId = ns.Games[b or ""] and b or "deathroll"
         local g = ns.Games[gameId]
-        ns.Table.open({ game = gameId, wager = 2550, start = 1000, maxSeats = g.maxSeats, chips = true, practice = true, stamp = time() })   -- 25s 50c
-        for i = 1, math.min(tonumber(a) or 1, g.maxSeats - 1, #BOT_NAMES) do
+        -- practice Blackjack: the house deals from the dealer spot, so one seat fewer
+        local max = gameId == "blackjack" and g.maxSeats - 1 or g.maxSeats
+        ns.Table.open({ game = gameId, wager = 2550, start = 1000, maxSeats = max, chips = true, practice = true, stamp = time() })   -- 25s 50c
+        for i = 1, math.min(tonumber(a) or 1, max - 1, #BOT_NAMES) do
             ns.bots[BOT_NAMES[i]] = true
             ns.Table.addBot(BOT_NAMES[i])
         end

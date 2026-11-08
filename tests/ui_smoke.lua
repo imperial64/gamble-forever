@@ -72,7 +72,8 @@ C_CVar = { GetCVar = function() return "0" end, SetCVar = function() end }
 C_ChatInfo = {
     RegisterAddonMessagePrefix = function() return 0 end,
     InChatMessagingLockdown = function() return false end,
-    SendAddonMessage = function(prefix, msg, ch, target) sent[#sent + 1] = { prefix = prefix, msg = msg, ch = ch }; return 0 end,
+    -- solo, nothing may go out: Forever answers each self-whisper with a "No player named" error
+    SendAddonMessage = function(prefix, msg, ch, target) error("solo table sent over " .. tostring(ch)) end,
 }
 function UnitName(u) if u == "player" then return "Efe" end end
 function UnitExists(u) return u == "player" end

@@ -141,10 +141,13 @@ local LAYOUT = {
     deathroll = { seats = ring({ 180, 0, 140, 40, 220, 320 }, 560, 215), scale = 1 },
     highlow = { seats = ring({ 180, 0, 148, 32, 212, 328, 118, 62 }, 560, 220), scale = .8 },
     coinflip = { seats = { { -480, -10 }, { 480, -10 } }, scale = 1 },
-    blackjack = { scale = .72,
-        seats = { { 0, 220 }, { -545, 30 }, { -395, -170 }, { 0, -205 }, { 395, -170 }, { 545, 30 } },
-        cards = { { 0, 105 }, { -330, 35 }, { -235, -55 }, { 0, -80 }, { 235, -55 }, { 330, 35 } },
-        hostHand = { 215, 160 } },
+    -- slot 1 is the dealer. A practice table has no dealer seat (the house deals) and the host
+    -- plays from the bottom centre. The bottom seat clears the status line (y -268) and the
+    -- dealer seat clears the subtitle (y 285); turn text sits top left, opposite the shoe.
+    blackjack = { scale = .65,
+        seats = { { 0, 190 }, { -545, 40 }, { -380, -165 }, { 0, -180 }, { 380, -165 }, { 545, 40 } },
+        cards = { { 0, 45 }, { -330, 40 }, { -230, -55 }, { 0, -55 }, { 230, -55 }, { 330, 40 } },
+        practiceSlots = { 4, 2, 3, 5, 6 }, info = { -440, 200 } },
     poker = { scale = .72,
         seats = { { 0, -205 }, { -400, -170 }, { -555, 30 }, { 0, 220 }, { 555, 30 }, { 400, -170 } },
         cards = { { 0, -88 }, { -250, -72 }, { -360, 30 }, { 125, 205 }, { 360, 30 }, { 250, -72 } } },
@@ -220,12 +223,23 @@ local function edge(parent, side, orientation, from, to, size)
     t:SetGradient(orientation, CreateColor(0, 0, 0, from), CreateColor(0, 0, 0, to))
 end
 
-local function layoutSeats(gameId)
-    if W.layout == gameId then return end
-    W.layout = gameId
+-- where seat i sits on screen
+local function slotOf(t, i)
+    local m = t.practice and LAYOUT[t.game].practiceSlots
+    if m then return m[i] end
+    return i
+end
+
+local function layoutSeats(t)
+    local gameId = t.game
+    local key = gameId .. (t.practice and "p" or "")
+    if W.layout == key then return end
+    W.layout = key
     local lay = LAYOUT[gameId]
+    local info = lay.info or { 0, 170 }
+    W.cardInfo:SetPoint("CENTER", W.content, "CENTER", info[1], info[2])
     for i, s in ipairs(seats) do
-        local p = lay.seats[i]
+        local p = lay.seats[slotOf(t, i) or 0]
         s:ClearAllPoints()
         s:SetScale(lay.scale)
         if p then
@@ -713,7 +727,7 @@ local function refreshBlackjack(c, t)
         if #d > 0 then label("dt", "Dealer  " .. handLabel(t.dealer), dx, dy + 56, 14) end
         for s = ns.Games.blackjack.first(t), #t.seats do
             local hands = t.hands and t.hands[s] or {}
-            local spot = s == 1 and lay.hostHand or lay.cards[s]   -- practice: the host plays from the top
+            local spot = lay.cards[slotOf(t, s)]
             local ax, ay = spot[1], spot[2]
             for h, hand in ipairs(hands) do
                 local hx = ax + (h - (#hands + 1) / 2) * 92
@@ -730,7 +744,8 @@ local function refreshBlackjack(c, t)
     end
     endFelt()
     if t.phase == "seating" then
-        W.cardInfo:SetText(("Waiting for players  %d / %d"):format(#t.seats - 1, t.maxSeats - 1))
+        local house = t.practice and 0 or 1   -- a real table's seat 1 deals and does not play
+        W.cardInfo:SetText(("Waiting for players  %d / %d"):format(#t.seats - house, t.maxSeats - house))
         W.status:SetText(waitingNote(c, t))
     elseif t.phase == "dealing" then
         W.cardInfo:SetText(t.reshuffled and "New shoe. Dealing..." or "Dealing...")
@@ -859,7 +874,7 @@ local function refresh()
     local t = c.t
     local g = t.game
     local mine = ns.Table.myTurn()
-    layoutSeats(g)
+    layoutSeats(t)
     W.title:SetText(TITLES[g])
     W.dr:SetShown(g == "deathroll")
     W.hl:SetShown(g == "highlow")
@@ -871,12 +886,12 @@ local function refresh()
 
     for i, s in ipairs(seats) do
         local name = t.seats[i]
-        if name and LAYOUT[g].seats[i] then
+        if name and LAYOUT[g].seats[slotOf(t, i) or 0] then
             s:Show()
             s:SetPlayer(name)
             local state = seatState(t, i)
             if s.state ~= state then s:SetState(state) end
-            s:SetNote(i == 1 and (g == "blackjack" and "dealer" or "host") or "")
+            s:SetNote(i == 1 and (g == "blackjack" and not t.practice and "dealer" or "host") or "")
         else
             s:Hide()
         end
@@ -1036,7 +1051,7 @@ local function refreshRoom(cur)
             row.num:SetText(i)
             if name then
                 row.name:SetText(nm(name)); row.name:SetTextColor(classColor(name))
-                row.tag:SetText(i == 1 and (t.game == "blackjack" and "dealer" or "host") or (ns.bots[name] and "practice bot")
+                row.tag:SetText(i == 1 and (t.game == "blackjack" and not t.practice and "dealer" or "host") or (ns.bots[name] and "practice bot")
                     or (ns.Rolls.same(name, ns.me()) and "you") or "")
             else
                 row.name:SetText("open seat"); row.name:SetTextColor(.5, .42, .3)
