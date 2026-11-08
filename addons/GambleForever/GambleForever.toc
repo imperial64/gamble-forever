@@ -6,6 +6,7 @@
 ## SavedVariables: GambleForeverDB
 ## IconTexture: Interface\Icons\INV_Misc_Dice_02
 ## AddonCompartmentFunc: GambleForever_OnAddonCompartmentClick
+## X-Curse-Project-ID: 1791576
 
 Rolls.lua
 Cards.lua
