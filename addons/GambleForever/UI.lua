@@ -214,8 +214,10 @@ end
 
 ---------------------------------------------------------------- table view
 
+local edges = {}   -- full-screen vignette; window mode hides it
 local function edge(parent, side, orientation, from, to, size)
     local t = parent:CreateTexture(nil, "BACKGROUND")
+    edges[#edges + 1] = t
     t:SetColorTexture(1, 1, 1, 1)
     if side == "LEFT" or side == "RIGHT" then
         t:SetPoint("TOP" .. side); t:SetPoint("BOTTOM" .. side); t:SetWidth(size)
@@ -394,6 +396,45 @@ local function buildTable()
     edge(view, "RIGHT", "HORIZONTAL", 0, .9, 380)
     edge(view, "TOP", "VERTICAL", 0, .8, 230)
     edge(view, "BOTTOM", "VERTICAL", .95, 0, 260)
+
+    -- window mode: dark panel with a gold rim; drag to move, Ctrl + wheel to resize
+    W.winBg = view:CreateTexture(nil, "BACKGROUND")
+    W.winBg:SetAllPoints()
+    W.winBg:SetColorTexture(.04, .03, .02, .88)
+    W.winRim = {}
+    for _, side in ipairs({ "TOP", "BOTTOM", "LEFT", "RIGHT" }) do
+        local t = view:CreateTexture(nil, "BORDER")
+        t:SetColorTexture(.75, .6, .25, .9)
+        if side == "TOP" or side == "BOTTOM" then
+            t:SetPoint(side .. "LEFT"); t:SetPoint(side .. "RIGHT"); t:SetHeight(2)
+        else
+            t:SetPoint("TOP" .. side); t:SetPoint("BOTTOM" .. side); t:SetWidth(2)
+        end
+        W.winRim[#W.winRim + 1] = t
+    end
+    W.winHint = font(view, FRIZ, 12, "OUTLINE", { .6, .55, .45 })
+    W.winHint:SetPoint("BOTTOMLEFT", 12, 10)
+    W.winHint:SetText("Drag to move. Ctrl + mouse wheel to resize.")
+    view:SetMovable(true)
+    view:SetClampedToScreen(true)
+    view:RegisterForDrag("LeftButton")
+    view:SetScript("OnDragStart", view.StartMoving)
+    view:SetScript("OnDragStop", function(self)
+        self:StopMovingOrSizing()
+        self:SetUserPlaced(false)   -- we place it ourselves; keep it out of layout-cache.txt
+        local w, s = GambleForeverDB.settings.window, self:GetScale()
+        local x, y = self:GetCenter()
+        w.x, w.y = x * s, y * s   -- UIParent units, so a new scale keeps the centre
+    end)
+    view:SetScript("OnMouseWheel", function(self, delta)
+        if not IsControlKeyDown() then return end
+        local w = GambleForeverDB.settings.window
+        w.scale = math.max(.35, math.min(1.2, w.scale + delta * .05))
+        UI.placeWindow()
+    end)
+    -- Esc in window mode goes through UISpecialFrames; any hide (Esc, CloseAllWindows) leaves the table
+    tinsert(UISpecialFrames, "GambleForeverTableView")
+    view:SetScript("OnHide", function() ns.Stage.leave("hide") end)
 
     local c = CreateFrame("Frame", nil, view)
     c:SetSize(1365, 768)
@@ -604,9 +645,12 @@ local function buildTable()
     W.stingSub:SetPoint("TOP", W.stingText, "BOTTOM", 0, -6)
 
     view:SetScript("OnUpdate", onUpdate)
-    view:EnableKeyboard(true)
-    view:SetPropagateKeyboardInput(true)
-    view:SetScript("OnKeyDown", function(self, key)
+    -- immersive only: UIParent is hidden, so Esc is caught here. A separate frame, because
+    -- window mode stays open in combat, where keyboard propagation calls are blocked.
+    W.keys = CreateFrame("Frame", nil, view)
+    W.keys:EnableKeyboard(true)
+    W.keys:SetPropagateKeyboardInput(true)
+    W.keys:SetScript("OnKeyDown", function(self, key)
         if key == "ESCAPE" then
             self:SetPropagateKeyboardInput(false)
             ns.Stage.leave("hide")
@@ -1567,10 +1611,40 @@ end
 
 function UI.hideLobby() lobby:Hide() end
 
-function UI.tableShown() return view and view:IsShown() end
+function UI.placeWindow()
+    local w = GambleForeverDB.settings.window
+    if not w.scale then w.scale = math.max(.35, math.min(1, UIParent:GetWidth() * .55 / 1365)) end
+    view:SetScale(w.scale)
+    view:ClearAllPoints()
+    if w.x then
+        view:SetPoint("CENTER", UIParent, "BOTTOMLEFT", w.x / w.scale, w.y / w.scale)
+    else
+        view:SetPoint("CENTER", UIParent, "CENTER", 0, 40 / w.scale)
+    end
+end
 
-function UI.showTable(on)
-    if on then
+-- mode "immersive" fills the screen over a hidden UIParent; "window" is a movable panel in the normal UI
+function UI.showTable(mode)
+    if mode then
+        local win = mode == "window"
+        view:SetParent(win and UIParent or nil)
+        view:SetFrameStrata(win and "MEDIUM" or "DIALOG")
+        view:SetToplevel(win)
+        view:EnableMouse(win)
+        view:EnableMouseWheel(win)
+        for _, t in ipairs(edges) do t:SetShown(not win) end
+        W.winBg:SetShown(win)
+        W.winHint:SetShown(win)
+        for _, t in ipairs(W.winRim) do t:SetShown(win) end
+        W.keys:SetShown(not win)
+        if win then
+            view:SetSize(1365, 768)
+            UI.placeWindow()
+        else
+            view:SetScale(1)
+            view:ClearAllPoints()
+            view:SetAllPoints(WorldFrame)
+        end
         view:Show()
         view:SetAlpha(0)
         tween(.6, function(p) view:SetAlpha(p) end)

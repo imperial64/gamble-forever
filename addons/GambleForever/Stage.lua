@@ -33,15 +33,17 @@ function Stage.restoreLeftovers()
     if GambleForeverDB.stageBackup then Stage.restoreCamera() end
 end
 
-function Stage.isOn() return ns.UI.tableShown() end
+local mode   -- nil while the table is not showing, else "immersive" or "window"
+function Stage.isOn() return mode ~= nil end
 
 function Stage.enter()
-    if InCombatLockdown() then
+    if mode then return end
+    local s = GambleForeverDB.settings
+    if s.immersive and InCombatLockdown() then
         print("|cffffd100GambleForever|r the table opens once you are out of combat (/gf table).")
         return
     end
-    if Stage.isOn() then return end
-    local s = GambleForeverDB.settings
+    mode = s.immersive and "immersive" or "window"
     if s.immersive then
         pcall(UIParent.UnregisterEvent, UIParent, "EXPERIMENTAL_CVAR_CONFIRMATION_NEEDED")
         if GameEvent and GameEvent.UnregisterInternalEvent then
@@ -57,18 +59,23 @@ function Stage.enter()
         UIParent:Hide()
     end
     if s.music and not s.mute then pcall(PlayMusic, MUSIC) end
-    ns.UI.showTable(true)
+    ns.UI.showTable(mode)
 end
 
 -- reason "interrupt" (combat, death, ready check) keeps your seat; /gf table brings the view back.
+-- Only the immersive view closes for it: the window leaves the normal UI usable.
 function Stage.leave(reason)
-    if not Stage.isOn() then return end
+    if not mode or (reason == "interrupt" and mode == "window") then return end
+    local was = mode
+    mode = nil   -- first, so the view's OnHide calling back in is a no-op
     pcall(StopMusic)
-    -- PLAYER_REGEN_DISABLED fires just before combat lockdown; if showing is refused anyway,
-    -- Core shows it on PLAYER_REGEN_ENABLED.
-    if not UIParent:IsShown() then pcall(UIParent.Show, UIParent) end
-    Stage.restoreCamera()
-    ns.UI.showTable(false)
+    if was == "immersive" then
+        -- PLAYER_REGEN_DISABLED fires just before combat lockdown; if showing is refused anyway,
+        -- Core shows it on PLAYER_REGEN_ENABLED.
+        if not UIParent:IsShown() then pcall(UIParent.Show, UIParent) end
+        Stage.restoreCamera()
+    end
+    ns.UI.showTable(nil)
     if reason == "interrupt" and ns.Table.current() then
         print("|cffffd100GambleForever|r you are still seated. Type /gf table to return.")
     end

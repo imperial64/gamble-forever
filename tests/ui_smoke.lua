@@ -21,7 +21,11 @@ end
 methods.SetScript = function(s, k, f) s.scripts[k] = f end
 methods.GetScript = function(s, k) return s.scripts[k] end
 methods.Show = function(s) s.shown = true; if s.scripts.OnShow then s.scripts.OnShow(s) end end
-methods.Hide = function(s) s.shown = false end
+methods.Hide = function(s)
+    local was = s.shown
+    s.shown = false
+    if was and s.scripts.OnHide then s.scripts.OnHide(s) end
+end
 methods.SetShown = function(s, v) if v then s:Show() else s:Hide() end end
 methods.IsShown = function(s) return s.shown end
 methods.IsVisible = methods.IsShown
@@ -185,5 +189,28 @@ play("test 3 poker", function()
         ns.UI.stepRaise(1); ns.UI.potRaise()
     end
 end)
+
+-- Immersive off: the table is a window that survives combat and closes on Esc (UISpecialFrames hides it)
+local ok, err = pcall(function()
+    GambleForeverDB.settings.immersive = false
+    SlashCmdList.GAMBLEFOREVER("test 1 deathroll")
+    tick()
+    ns.Table.startGame()
+    tick()
+    local view = _G.GambleForeverTableView
+    assert(ns.Stage.isOn() and view:IsShown(), "window did not open")
+    fire("PLAYER_REGEN_DISABLED")
+    assert(ns.Stage.isOn() and view:IsShown(), "window closed in combat")
+    view:Hide()   -- what CloseSpecialWindows does on Esc
+    assert(not ns.Stage.isOn(), "hiding the window did not leave the table view")
+    SlashCmdList.GAMBLEFOREVER("table")
+    assert(ns.Stage.isOn() and view:IsShown(), "/gf table did not reopen the window")
+    ns.Table.close()
+    tick()
+    assert(not view:IsShown(), "closing the table left the window up")
+    GambleForeverDB.settings.immersive = true
+end)
+if ok then passed = passed + 1; print("  ok    window mode")
+else failed = failed + 1; print("  FAIL  window mode: " .. tostring(err)) end
 print(("\n%d passed, %d failed"):format(passed, failed))
 os.exit(failed == 0 and 0 or 1)
