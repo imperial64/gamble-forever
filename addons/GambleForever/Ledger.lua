@@ -30,6 +30,27 @@ function Ledger.settleNet(net)
     return debts
 end
 
+-- Payments from many rounds netted per pair of players, biggest first: A owing B 300 and B
+-- owing A 100 becomes one row, A pays B 200.
+function Ledger.pairNet(debts)
+    local bal, order = {}, {}
+    for _, d in ipairs(debts) do
+        local a, b, v = d.from, d.to, d.amount
+        if a > b then a, b, v = b, a, -v end   -- v > 0: a pays b
+        local k = a .. "\n" .. b
+        if not bal[k] then bal[k] = { a = a, b = b, v = 0 }; order[#order + 1] = k end
+        bal[k].v = bal[k].v + v
+    end
+    local out = {}
+    for _, k in ipairs(order) do
+        local e = bal[k]
+        if e.v > 0 then out[#out + 1] = { from = e.a, to = e.b, amount = e.v }
+        elseif e.v < 0 then out[#out + 1] = { from = e.b, to = e.a, amount = -e.v } end
+    end
+    table.sort(out, function(x, y) if x.amount ~= y.amount then return x.amount > y.amount end return x.from < y.from end)
+    return out
+end
+
 -- Net per counterpart: positive means they owe me, negative means I owe them.
 function Ledger.net(entries, me)
     local out = {}

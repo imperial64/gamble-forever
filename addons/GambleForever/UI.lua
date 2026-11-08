@@ -9,6 +9,7 @@ local GOLD, RED = { 1, .82, 0 }, { 1, .15, .08 }
 local INK, INK_RED = { .2, .12, .04 }, { .38, .07, .02 }
 local lobby, view, seats = nil, nil, {}
 local W, L = {}, {}   -- table view and lobby widgets
+local held = {}       -- seats whose win or loss is still being animated: no glow until the reveal
 
 local function art(name) return ns.media .. "ui\\" .. name .. ".png" end
 local function font(parent, path, size, flags, color)
@@ -709,7 +710,7 @@ local function refreshDeathroll(c, t, mine)
         W.range:SetText("/roll 1 - " .. t.cur)
         W.status:SetText(mine and "Click ROLL. Roll a 1 and you are out." or "")
     elseif t.phase == "done" then
-        W.turn:SetText(nm(t.seats[t.winner]):upper() .. " WINS")
+        W.turn:SetText(next(held) and "" or (nm(t.seats[t.winner]):upper() .. " WINS"))
         W.range:SetText("")
     end
 end
@@ -971,7 +972,7 @@ local function refresh()
     local t = c.t
     local g = t.game
     local mine = ns.Table.myTurn()
-    if t.phase ~= "done" then W.settle:Hide() end
+    W.settle:SetShown(W.tally and W.tally.tid == c.tid and W.tally.shown or false)
     layoutSeats(t)
     W.title:SetText(TITLES[g])
     W.dr:SetShown(g == "deathroll")
@@ -988,6 +989,7 @@ local function refresh()
             s:Show()
             s:SetPlayer(name)
             local state = seatState(t, i)
+            if held[i] and (state == "win" or state == "out") then state = nil end
             if s.state ~= state then s:SetState(state) end
             s:SetNote(i == 1 and (g == "blackjack" and not t.practice and "dealer" or "host") or "")
         else
@@ -1005,7 +1007,11 @@ end
 
 ---------------------------------------------------------------- per-game moments
 
+local function hold(...) for _, s in ipairs({ ... }) do held[s] = true end end
+local function release() wipe(held); refresh() end
+
 local function flipCoin(ev, t)
+    hold(1, 2)
     W.flipping = true
     ns.sound("chipLay1")
     W.cfInfo:SetText("")
@@ -1027,6 +1033,7 @@ local function flipCoin(ev, t)
             tween(.7, function(q) W.coinFlash:SetVertexColor(1, .8, .3, .9 * (1 - q)) end)
             ns.sound("chipsStack2")
             W.flipping = false
+            release()
             local side = ev.winner == 1 and "HEADS" or "TAILS"
             W.cfInfo:SetText(side .. "  -  " .. nm(t.seats[ev.winner]) .. " wins")
             stinger(side, nm(t.seats[ev.winner]) .. " wins " .. money(t, t.wager), 1.6, GOLD)
@@ -1081,8 +1088,10 @@ local function onEvent(ev)
         throwDice(ev.seat, ev.value, prev)
     elseif ev.kind == "out" or ev.kind == "win" then
         ns.sound("diceThrow2")
+        hold(ev.seat, ev.winner)
         throwDice(ev.seat, 1, prev, function()
             ns.sound("dieThrow1")
+            release()
             seats[ev.seat]:Anim("death")
             if ev.kind == "out" then
                 stinger("OUT", nm(t.seats[ev.seat]) .. " rolled a 1", 1.2)
@@ -1112,23 +1121,31 @@ local function showSettled(t, debts)
         if w then w:Anim("cheer", 4); coinShower(w.ox, w.oy + 60, 40) end
         ns.sound("chipsStack1")
     end
-    if #debts == 0 then return end
-    local round = t.round
-    C_Timer.After(2.6, function()   -- after the stinger
-        local c = ns.Table.current()
-        if not (c and c.t.phase == "done" and c.t.round == round) then return end
+    -- running total for this table: every round's payments, netted per pair
+    local c = ns.Table.current()
+    if not c then return end
+    if not (W.tally and W.tally.tid == c.tid) then W.tally = { tid = c.tid, debts = {}, rounds = 0 } end
+    local tally = W.tally
+    tally.rounds = tally.rounds + 1
+    for _, d in ipairs(debts) do tally.debts[#tally.debts + 1] = d end
+    if #tally.debts == 0 then return end
+    C_Timer.After(2.6, function()   -- after the stinger, so it never gives the result away
+        if W.tally ~= tally then return end
+        tally.shown = true
         local p = W.settle
-        p.count = #debts
-        for i, d in ipairs(debts) do
+        local rows = ns.Ledger.pairNet(tally.debts)
+        p.count = #rows
+        for i, d in ipairs(rows) do
             local r = settleRow(i)
             r.who:SetText(nm(d.from) .. "  >  " .. nm(d.to)); r.amt:SetText(ns.coins(d.amount))
             r.who:Show(); r.amt:Show()
         end
-        for i = #debts + 1, #p.rows do p.rows[i].who:Hide(); p.rows[i].amt:Hide() end
-        p.list:SetHeight(#debts * ROW_H)
+        for i = #rows + 1, #p.rows do p.rows[i].who:Hide(); p.rows[i].amt:Hide() end
+        p.list:SetHeight(math.max(1, #rows) * ROW_H)
         p.sf:SetVerticalScroll(0)
-        p.foot:SetText((t.chips and "Chips only: no gold changes hands." or "Trade it; the ledger marks it paid.")
-            .. (#debts > SETTLE_ROWS and "  Scroll for more." or ""))
+        p.foot:SetText(("%d %s  -  %s%s"):format(tally.rounds, tally.rounds == 1 and "round" or "rounds",
+            t.chips and "chips only, no gold" or "trade it, the ledger marks it paid",
+            #rows > SETTLE_ROWS and "  -  scroll" or ""))
         layoutSettle()
         p:Show()
     end)
@@ -1585,6 +1602,7 @@ function UI.handle(what, ...)
         print("|cffffd100GambleForever|r the host closed the table.")
         refreshLobby()
     elseif what == "leave" then
+        wipe(held)
         refreshLobby()
     end
 end

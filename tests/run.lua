@@ -545,6 +545,15 @@ test("settleNet: fewest payments from net results", function()
     local d = L.settleNet({ A = 300, B = -200, C = -100, D = 0 })
     check(#d == 2 and d[1].from == "B" and d[1].to == "A" and d[1].amount == 200 and d[2].from == "C" and d[2].amount == 100, "two payments")
 end)
+test("pairNet: rounds at one table add up per pair, both directions netted", function()
+    local L = load({}).Ledger
+    local d = L.pairNet({
+        { from = "B", to = "A", amount = 100 }, { from = "B", to = "A", amount = 100 }, { from = "B", to = "A", amount = 100 },
+        { from = "A", to = "B", amount = 50 }, { from = "C", to = "A", amount = 40 }, { from = "A", to = "C", amount = 40 } })
+    check(#d == 1 and d[1].from == "B" and d[1].to == "A" and d[1].amount == 250, "three wins minus one loss, C squared")
+    d = L.pairNet({ { from = "A", to = "B", amount = 10 }, { from = "C", to = "B", amount = 30 } })
+    check(#d == 2 and d[1].from == "C" and d[1].amount == 30 and d[2].from == "A", "biggest first")
+end)
 test("net, full and partial payment", function()
     local ns = load({}); local L = ns.Ledger
     local e = {}

@@ -8,6 +8,9 @@ Backlog from playtests. Highest priority first.
 
 ## Done
 
+- **B10 Seat glow gave the result away.** The winner's gold glow (and the loser's red) lit up the moment the state arrived, before the coin landed or the deathroll dice settled. Those seats now wait for the reveal, and so does the "X WINS" line. Reported in chat 2026-11-08.
+- **B9 Settle Up showed only the last round.** It now keeps a running total for the table, netted per pair (win three coinflips, lose one: one row for two wins' worth), with the round count in the footer. It stays up between rounds and updates after each reveal. Reported in chat 2026-11-08.
+
 - **B8 Coinflip looked flat.** It was an item icon squashed sideways. Now a drawn two-sided coin (crown heads, skull tails, reeded edge from `scripts/make-coin-art.py`) tossed in an arc, flipping end over end and slowing, with a shadow on the felt, one bounce and a gold flash on landing. Requested in chat 2026-11-08.
 - **B7 Settle Up card folds and scrolls.** Fold button in its header (remembered in `settings.settleFolded`; folded shows the payment count); more than 4 payments scroll with the mouse wheel. Requested in chat 2026-11-08.
 
