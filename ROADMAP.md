@@ -4,9 +4,12 @@ Backlog from playtests. Highest priority first.
 
 ## Open
 
-- **B4 Hole cards may never reach the friend (Hold'em).** Forever rejects an addon whisper to the first name ("No player named 'Efe'", seen in [playtest 1](feedback/2026-11-08-playtest-1.md)), and `whisperTarget` in `Core.lua` whispers exactly that. Needs an in-game test of which name form the server accepts; if none works, send hole cards over PARTY encrypted with a Diffie-Hellman key per player.
+- **B4 Hole cards may never reach the friend (Hold'em).** Forever rejects an addon whisper to the first name ("No player named 'Efe'", seen in [playtest 1](feedback/2026-11-08-playtest-1.md)), and `whisperTarget` in `Core.lua` whispers exactly that. [Playtest 2](feedback/2026-11-08-playtest-2.md) says "everything else works", which may mean the friend saw their cards (a whisper to yourself may be the only failing case). Confirm the friend saw only their own two cards; if not, send hole cards over PARTY encrypted with a Diffie-Hellman key per player.
+- **B11 High-Low roll cap.** `/roll 1000001` prints nothing, so the server refuses it ([playtest 2](feedback/2026-11-08-playtest-2.md)). `HighLow.ROLL_MAX` assumes 1,000,000 works; still to check that `/roll 1000000` prints a roll. If it does not, the cap is lower and High-Low's unit switch must move.
 
 ## Done
+
+- **B12 Hold'em street text sat on the top seat's nameplate.** "SHOWDOWN" (and PRE-FLOP, FLOP...) was at y 170, on the top seat's plate. It now sits between the pot and the top seat. [playtest 2](feedback/2026-11-08-playtest-2.md)
 
 - **B10 Seat glow gave the result away.** The winner's gold glow (and the loser's red) lit up the moment the state arrived, before the coin landed or the deathroll dice settled. Those seats now wait for the reveal, and so does the "X WINS" line. Reported in chat 2026-11-08.
 - **B9 Settle Up showed only the last round.** It now keeps a running total for the table, netted per pair (win three coinflips, lose one: one row for two wins' worth), with the round count in the footer. It stays up between rounds and updates after each reveal. Reported in chat 2026-11-08.
@@ -22,5 +25,7 @@ Backlog from playtests. Highest priority first.
 - **B3 Blackjack: the host was both dealer and player, and labels overlapped.** On a practice table the house now deals from an empty dealer spot and the host plays from the bottom centre (host plus up to 4 bots). Real tables keep the host as the dealer who banks and has no hand. New layout: seat scale .65, dealer seat below the subtitle, bottom seat above the status line, turn text top left opposite the shoe. [playtest 1](feedback/2026-11-08-playtest-1.md)
 
 ## Notes
+
+- Hold'em stacks are 100 big blinds, and the big blind is the table's wager. A practice table (`/gf test`) uses a 25s 50c wager, so stacks start at 25g 50s; 24g 73s 50c is that minus what went into the pot ([playtest 2](feedback/2026-11-08-playtest-2.md)).
 
 - `SurnamePerCharacter` (in the AddOns folder) is the user's own addon. It only remembers the "show surname over head" setting per character and has nothing to do with Deathroll. The "First Last" names come from Forever itself.
