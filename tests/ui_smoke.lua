@@ -167,6 +167,12 @@ local function play(cmd, decide)
         end
         local c = assert(ns.Table.current(), "no table")
         assert(c.t.phase == "done", "game did not finish, phase " .. tostring(c.t.phase) .. " turn " .. tostring(c.t.turn) .. " cur " .. tostring(c.t.cur) .. " hist " .. #(c.t.history or {}) .. " timers " .. #timers)
+        -- chat tables: someone joins between rounds, and the open table view takes the new seat
+        local n = #c.t.seats
+        ns.bots["Ostrik Gravelmaw"] = true
+        ns.Table.chatCommand("Ostrik Gravelmaw", "join")
+        tick()
+        assert(not c.chat or n == c.t.maxSeats or #c.t.seats == n + 1, "the late join was not seated")
         ns.Table.startGame()   -- rematch / next hand
         for _ = 1, 30 do tick(1); serverRolls(); decide() end
         ns.Table.close()

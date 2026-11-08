@@ -194,7 +194,11 @@ function ns.emit(what, ...)
             ns.Stage.enter()
         end
     elseif what == "enter" then
-        ns.UI.showRoom()   -- opening or joining a table lands in the waiting room
+        -- opening or joining a table lands in the waiting room; joined between rounds, the
+        -- finished round is not mine to watch, so the next Rematch pulls me in
+        local c = ns.Table.current()
+        if c and c.t.phase == "done" then c.entered = c.t.round end
+        ns.UI.showRoom()
     elseif what == "leave" or what == "closed" then
         wipe(ns.bots)
         ns.Stage.leave(what)

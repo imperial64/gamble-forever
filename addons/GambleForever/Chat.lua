@@ -236,10 +236,11 @@ function Chat.hostChanged(c, ev)
         c.saidOpen, c.saidSeats = true, #t.seats
         say(Chat.openLine(t))
     end
-    if t.phase == "seating" then
-        if c.saidSeats ~= #t.seats then c.saidSeats = #t.seats; say(Chat.seatsLine(t), "seats") end
-        return
+    if (t.phase == "seating" or t.phase == "done") and c.saidSeats ~= #t.seats then
+        c.saidSeats = #t.seats
+        say(Chat.seatsLine(t), "seats")
     end
+    if t.phase == "seating" then return end
     if c.saidStart ~= t.round then
         c.saidStart = t.round
         local l = startLine(t)
@@ -260,7 +261,7 @@ function Chat.hostChanged(c, ev)
     end
     if t.phase == "done" and c.saidDone ~= t.round then
         c.saidDone = t.round
-        say(resultLine(t))
+        say(resultLine(t) .. (#t.seats < t.maxSeats and " Type join to play the next round." or ""))
     end
     local p, key = prompt(c, t)
     if p and key ~= c.saidPrompt then c.saidPrompt = key; say(p, "prompt")

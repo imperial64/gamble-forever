@@ -601,7 +601,7 @@ test("Blackjack by chat: Bob sees the deal, hits, stands, and gets the result", 
     check(P.saidLike("Bob: 10h 6s 4c %(20%) vs 6d%. hit, stand%?"), "the new card shows in the next prompt")
     P.bob("stand"); P.flush()
     dealCards(P, host, { "Kh", "2c" })   -- dealer 6+10+2 = 18
-    check(P.saidLike("^%[GF%] Dealer: 6d Kh 2c %(18%)%. Bob wins 1g%.$"), "the result is narrated")
+    check(P.saidLike("^%[GF%] Dealer: 6d Kh 2c %(18%)%. Bob wins 1g%. Type join to play the next round%.$"), "the result is narrated, with an invitation")
 end)
 
 test("Hold'em by chat: hole cards by whisper, prompts with amounts, raise in gold", function()
@@ -619,7 +619,7 @@ test("Hold'em by chat: hole cards by whisper, prompts with amounts, raise in gol
     host.Table.act("call"); P.flush()
     check(P.saidLike("^%[GF%] Flop: %w+ %w+ %w+%. Pot 20g%.$"), "the flop is narrated")
     P.bob("fold")
-    check(t.phase == "done" and P.saidLike("^%[GF%] Efe wins 20g, everyone else folded%.$"), "the result is narrated")
+    check(t.phase == "done" and P.saidLike("^%[GF%] Efe wins 20g, everyone else folded%."), "the result is narrated")
 end)
 
 test("chat on with only addon players: the game is posted, nobody is prompted", function()
@@ -628,7 +628,30 @@ test("chat on with only addon players: the game is posted, nobody is prompted", 
     host.Table.startGame(); P.flush(); P.serverRoll(2)   -- Talmika first
     check(P.saidLike("^%[GF%] Deathroll from 1000") and not P.saidLike("/roll 1%-"), "start posted, no prompt for an addon player")
     tal.Table.rollMine(); P.serverRoll(1)
-    check(P.saidLike("^%[GF%] Efe wins%. Talmika pays Efe 1g%.$"), "result posted")
+    check(P.saidLike("^%[GF%] Efe wins%. Talmika pays Efe 1g%. Type join"), "result posted, with an invitation")
+end)
+
+test("between rounds an addon player and a chat player join; the next round deals them in", function()
+    local P, host = chatTable({ "Efe Imperial", "Talmika Waystalker", "Nox Aeterna", "Bob Noaddon" }, { game = "poker", wager = 100, maxSeats = 6, stamp = 26 })
+    local nox = P.clients["Nox Aeterna"]
+    nox.Table.close(); P.flush()   -- Nox sits out the first hand
+    local t = host.Table.current().t
+    check(#t.seats == 2, "two seats for hand 1")
+    host.Table.startGame(); P.flush()
+    P.bob("join")
+    check(P.saidLike("^%[GF%] Bob, a round is on"), "a join mid-hand is refused, with a reason")
+    host.Table.act("fold"); P.flush()
+    check(t.phase == "done", "hand 1 over")
+    nox.Table.join(host.Table.current().tid); P.flush()
+    P.bob("join")
+    check(#t.seats == 4 and t.seats[3] == "Nox Aeterna" and t.seats[4] == "Bob Noaddon", "both seated between rounds")
+    check(nox.Table.current() and nox.Table.current().t.phase == "done", "Nox is at the table, waiting")
+    check(P.saidLike("Seated %(4/6%)"), "the new seats are posted")
+    host.Table.startGame(); P.flush()
+    local nt = nox.Table.current().t
+    check(nt.round == 2 and nt.myHole and #nt.myHole == 2, "Nox gets hole cards in hand 2")
+    check(P.saidLike("^%(to Bob Noaddon%) %[GF%] Your cards for hand 2"), "Bob gets his by whisper")
+    check(P.count("Nox Aeterna", "settled") == 0, "Nox does not settle the hand he missed")
 end)
 
 test("without chat play, chat lines do nothing", function()

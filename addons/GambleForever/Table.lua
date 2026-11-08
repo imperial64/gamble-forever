@@ -299,7 +299,8 @@ end
 local function hostIntent(c, evt, sender, payload)
     local t = c.t
     if evt == "SIT" then
-        if t.phase == "seating" and #t.seats < t.maxSeats and not seatOf(t, sender) then
+        -- before the first start, or between rounds (the next Start or Rematch deals them in)
+        if (t.phase == "seating" or t.phase == "done") and #t.seats < t.maxSeats and not seatOf(t, sender) then
             t.seats[#t.seats + 1] = sender
             hostChanged(c, nil, true)
         else
@@ -450,9 +451,10 @@ function T.chatCommand(sender, text)
     local t = c.t
     if action == "join" then
         if seatOf(t, sender) then return end
-        if t.phase ~= "seating" or #t.seats >= t.maxSeats then
-            ns.say(("[GF] %s, the table is %s."):format(sender:match("^[^ %-]+"),
-                t.phase ~= "seating" and "already playing" or "full"))
+        local between = t.phase == "seating" or t.phase == "done"
+        if not between or #t.seats >= t.maxSeats then
+            ns.say(("[GF] %s, %s."):format(sender:match("^[^ %-]+"),
+                between and "the table is full" or "a round is on; type join again when it ends"))
             return
         end
         c.chatters[sender] = true
