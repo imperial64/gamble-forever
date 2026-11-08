@@ -1304,6 +1304,7 @@ local function refreshLobby()
     L.empty:SetShown(#list == 0)
     L.chips:SetOn(L.chips.on)
     L.immersive:SetOn(GambleForeverDB.settings.immersive)
+    L.chat:SetOn(GambleForeverDB.settings.chatPlay)
 end
 
 local function field(parent, label, value, x, y, w)
@@ -1483,6 +1484,9 @@ local function buildLobby()
     L.chips:SetPoint("TOPLEFT", 16, -232)
     L.immersive = toggle(right, "Immersive", 112, function(on) GambleForeverDB.settings.immersive = on end)
     L.immersive:SetPoint("TOPLEFT", 136, -232)
+    -- players without the addon type join, hit, call, raise 50 ... in party/raid chat
+    L.chat = toggle(right, "Chat play", 232, function(on) GambleForeverDB.settings.chatPlay = on end)
+    L.chat:SetPoint("TOPLEFT", 16, -264)
     local open = skinButton(right, "Open Table", 232, 36, "gold", function()
         if ns.Table.current() then print("|cffffd100GambleForever|r leave your current table first."); return end
         local g = ns.Games[L.game]
@@ -1491,7 +1495,7 @@ local function buildLobby()
             + math.min(99, tonumber(L.copper:GetText()) or 0)
         if wager < 2 then print("|cffffd100GambleForever|r set a wager of at least 2 copper."); return end
         ns.Table.open({ game = L.game, wager = wager, start = tonumber(L.start:GetText()) or 1000,
-            maxSeats = seatsN, chips = L.chips.on, stamp = time() })
+            maxSeats = seatsN, chips = L.chips.on, chat = L.chat.on, stamp = time() })
     end, 18)
     open:SetPoint("BOTTOM", 0, 14)
     L.browse = { left, right }

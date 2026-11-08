@@ -12,6 +12,7 @@ Cards.lua
 Games.lua
 Blackjack.lua
 Poker.lua
+Chat.lua
 Table.lua
 Ledger.lua
 Scene.lua

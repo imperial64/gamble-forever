@@ -20,12 +20,7 @@ ns.media = "Interface\\AddOns\\GambleForever\\media\\"
 function ns.coins(copper)
     copper = math.floor(copper or 0)
     if GetCoinTextureString then return GetCoinTextureString(copper) end
-    local g, s, c = math.floor(copper / 10000), math.floor(copper / 100) % 100, copper % 100
-    local out = {}
-    if g > 0 then out[#out + 1] = g .. "g" end
-    if s > 0 then out[#out + 1] = s .. "s" end
-    if c > 0 or #out == 0 then out[#out + 1] = c .. "c" end
-    return table.concat(out, " ")
+    return ns.Chat.money(copper)
 end
 
 function ns.sound(name)
@@ -84,6 +79,38 @@ function ns.whisper(name, msg)
     if not ticking then pump() end
 end
 
+-- Chat narration (Chat.lua): one line a second, so a busy table stays under the server's chat
+-- throttle. A queued line with the same key is dropped for the new one, which goes to the back
+-- so it follows the lines that led to it (an old prompt is never sent). Held during an
+-- encounter lockdown. Solo (practice) the lines only show in my chat frame.
+local said, saying = {}, false
+local function sayPump()
+    saying = false
+    local m = said[1]
+    if not m then return end
+    saying = true
+    if ns.lockdown() then C_Timer.After(1, sayPump); return end
+    table.remove(said, 1)
+    local ch = channel()
+    if ch and m.to then ch = "WHISPER" end
+    if not ch then
+        DEFAULT_CHAT_FRAME:AddMessage(m.to and ("(to " .. m.to .. ") " .. m.text) or m.text, 1, .82, 0)
+    else
+        pcall(SendChatMessage, m.text, ch, nil, m.to and whisperTarget(m.to) or nil)
+    end
+    C_Timer.After(1, sayPump)
+end
+local function queueSay(m)
+    if m.key then
+        for i, q in ipairs(said) do if q.key == m.key then table.remove(said, i); break end end
+    end
+    if not m.text then return end   -- ns.say(nil, key): only drop the queued line
+    said[#said + 1] = m
+    if not saying then sayPump() end
+end
+function ns.say(text, key) queueSay({ text = text, key = key }) end
+function ns.sayTo(name, text) queueSay({ text = text, to = name }) end
+
 ---------------------------------------------------------------- events from the pure modules
 
 -- Practice bots: they roll whenever the rules let them, and play cards with simple habits.
@@ -133,7 +160,8 @@ local function botTurn()
     end
     for name in pairs(ns.bots) do
         local lo, hi = g.rangeFor(t, name)
-        local step = table.concat({ t.round or 0, t.phase, t.cur or 0, tostring(t.tieRolls) }, ":")
+        -- history length too: a later turn can land on the same range again (cur resets after a 1)
+        local step = table.concat({ t.round or 0, t.phase, t.cur or 0, t.history and #t.history or 0, tostring(t.tieRolls) }, ":")
         if lo and botStep[name] ~= step then
             botStep[name] = step
             C_Timer.After(.8 + math.random() * 1.4, function()
@@ -207,7 +235,8 @@ end
 local f = CreateFrame("Frame")
 for _, ev in ipairs({ "ADDON_LOADED", "PLAYER_LOGIN", "PLAYER_LOGOUT", "CHAT_MSG_ADDON", "CHAT_MSG_SYSTEM",
     "ADDON_RESTRICTION_STATE_CHANGED", "PLAYER_REGEN_DISABLED", "PLAYER_REGEN_ENABLED", "PLAYER_DEAD", "READY_CHECK", "GROUP_ROSTER_UPDATE",
-    "TRADE_SHOW", "TRADE_ACCEPT_UPDATE", "TRADE_CLOSED", "UI_INFO_MESSAGE" }) do
+    "TRADE_SHOW", "TRADE_ACCEPT_UPDATE", "TRADE_CLOSED", "UI_INFO_MESSAGE",
+    "CHAT_MSG_PARTY", "CHAT_MSG_PARTY_LEADER", "CHAT_MSG_RAID", "CHAT_MSG_RAID_LEADER" }) do
     pcall(f.RegisterEvent, f, ev)   -- an event this client lacks raises; skip it
 end
 
@@ -237,6 +266,10 @@ f:SetScript("OnEvent", function(_, ev, ...)
         if isSecret(prefix) or isSecret(msg) or isSecret(sender) or prefix ~= PREFIX then return end
         if not myFull and ns.Rolls.same(sender, UnitName("player")) then myFull = sender end
         ns.Table.onMessage(msg, sender)
+    elseif ev == "CHAT_MSG_PARTY" or ev == "CHAT_MSG_PARTY_LEADER" or ev == "CHAT_MSG_RAID" or ev == "CHAT_MSG_RAID_LEADER" then
+        local text, sender = ...
+        if isSecret(text) or isSecret(sender) then return end   -- encounter lockdown: chat play pauses
+        ns.Table.chatCommand(sender, text)
     elseif ev == "CHAT_MSG_SYSTEM" then
         local text = ...
         if isSecret(text) then return end
@@ -266,17 +299,19 @@ local BOT_NAMES = { "Grizzlenut Sparkfuse", "Thoradin Ironbrew", "Mirabelle Ashv
 SLASH_GAMBLEFOREVER1 = "/gf"
 SLASH_GAMBLEFOREVER2 = "/gamble"
 SlashCmdList.GAMBLEFOREVER = function(m)
-    local cmd, a, b = strsplit(" ", (m or ""):lower())
-    if cmd == "test" then   -- /gf test [bots] [deathroll|highlow|coinflip|blackjack|poker]
+    local cmd, a, b, mode = strsplit(" ", (m or ""):lower())
+    -- /gf test [bots] [deathroll|highlow|coinflip|blackjack|poker] [chat]
+    -- "chat" narrates as if the bots played by chat; solo, the lines show only in your chat frame
+    if cmd == "test" then
         if ns.Table.current() then ns.Table.close() end
         local gameId = ns.Games[b or ""] and b or "deathroll"
         local g = ns.Games[gameId]
         -- practice Blackjack: the house deals from the dealer spot, so one seat fewer
         local max = gameId == "blackjack" and g.maxSeats - 1 or g.maxSeats
-        ns.Table.open({ game = gameId, wager = 2550, start = 1000, maxSeats = max, chips = true, practice = true, stamp = time() })   -- 25s 50c
+        ns.Table.open({ game = gameId, wager = 2550, start = 1000, maxSeats = max, chips = true, practice = true, chat = mode == "chat", stamp = time() })   -- 25s 50c
         for i = 1, math.min(tonumber(a) or 1, max - 1, #BOT_NAMES) do
             ns.bots[BOT_NAMES[i]] = true
-            ns.Table.addBot(BOT_NAMES[i])
+            ns.Table.addBot(BOT_NAMES[i], mode == "chat")
         end
     elseif cmd == "leave" then
         ns.Table.close()

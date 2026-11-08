@@ -67,6 +67,10 @@ function CreateFrame(kind, name)
 end
 UIParent, WorldFrame, TradeFrame = obj("Frame"), obj("Frame"), obj("Frame")
 UISpecialFrames, SlashCmdList = {}, {}
+local chatLines = {}
+DEFAULT_CHAT_FRAME = obj("Frame")
+DEFAULT_CHAT_FRAME.AddMessage = function(_, m) chatLines[#chatLines + 1] = m end
+function SendChatMessage() error("solo table sent a chat line") end
 RANDOM_ROLL_RESULT = "%s rolls %d (%d-%d)"
 LE_GAME_ERR_TRADE_COMPLETE = 999
 RAID_CLASS_COLORS = { PALADIN = { r = .96, g = .55, b = .73 } }
@@ -162,7 +166,7 @@ local function play(cmd, decide)
             if c and c.t.phase == "done" and #timers == 0 and #rolls == 0 then break end
         end
         local c = assert(ns.Table.current(), "no table")
-        assert(c.t.phase == "done", "game did not finish, phase " .. tostring(c.t.phase))
+        assert(c.t.phase == "done", "game did not finish, phase " .. tostring(c.t.phase) .. " turn " .. tostring(c.t.turn) .. " cur " .. tostring(c.t.cur) .. " hist " .. #(c.t.history or {}) .. " timers " .. #timers)
         ns.Table.startGame()   -- rematch / next hand
         for _ = 1, 30 do tick(1); serverRolls(); decide() end
         ns.Table.close()
@@ -189,6 +193,23 @@ play("test 3 poker", function()
         ns.UI.stepRaise(1); ns.UI.potRaise()
     end
 end)
+-- "chat": the bots count as chat players, so every game is narrated (into my own chat frame)
+for _, g in ipairs({ "deathroll", "highlow", "coinflip", "blackjack", "poker" }) do
+    local before = #chatLines
+    play("test 3 " .. g .. " chat", function()
+        local can = ns.Table.myActions()
+        if ns.Table.myTurn() then ns.Table.rollMine() end
+        if can then ns.Table.act(can.check and "check" or can.call and "call" or "stand") end
+    end)
+    for _ = 1, 200 do tick(1) end   -- let the one-line-a-second queue drain
+    local n = 0
+    for i = before + 1, #chatLines do
+        local l = chatLines[i]
+        n = n + 1
+        if #l > 300 or l:find("nil") then failed = failed + 1; print("  FAIL  bad chat line: " .. l) end
+    end
+    if n < 2 then failed = failed + 1; print("  FAIL  " .. g .. " chat narrated " .. n .. " lines") end
+end
 
 -- Immersive off: the table is a window that survives combat and closes on Esc (UISpecialFrames hides it)
 local ok, err = pcall(function()
@@ -212,5 +233,6 @@ local ok, err = pcall(function()
 end)
 if ok then passed = passed + 1; print("  ok    window mode")
 else failed = failed + 1; print("  FAIL  window mode: " .. tostring(err)) end
+if os.getenv("SHOW_CHAT") then for _, l in ipairs(chatLines) do print(l) end end   -- read the narration
 print(("\n%d passed, %d failed"):format(passed, failed))
 os.exit(failed == 0 and 0 or 1)

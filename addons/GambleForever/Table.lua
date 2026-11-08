@@ -164,6 +164,7 @@ local function hostChanged(c, ev, rosterChanged)
     emit("state")
     checkSettled(c)
     hostAuto(c)
+    if c.chat then ns.Chat.hostChanged(c, ev) end
 end
 
 ---------------------------------------------------------------- host actions
@@ -176,16 +177,21 @@ function T.open(opts)
         chips = opts.chips and true or false, seats = { me }, phase = "seating", round = 0, rosterVer = 0 }
     g.setup(t, opts)
     local short = me:match("^[^ %-]+")
-    T.cur = { tid = short:sub(1, 6) .. ((opts.stamp or 0) % 100000), host = me, seq = 0, t = t, hosting = true }
+    -- chatters: seats taken by typing "join" in party/raid chat (Chat.lua narrates for them)
+    T.cur = { tid = short:sub(1, 6) .. ((opts.stamp or 0) % 100000), host = me, seq = 0, t = t, hosting = true,
+        chat = opts.chat and true or false, chatters = {} }
     broadcast(true)
     emit("enter")
     emit("state")
+    if T.cur.chat then ns.Chat.hostChanged(T.cur) end
 end
 
-function T.addBot(name)   -- /gf test: seats Core plays for
+-- /gf test: seats Core plays for; asChatter makes the narrator treat the bot as a chat player
+function T.addBot(name, asChatter)
     local c = T.cur
     if not (c and c.hosting and c.t.phase == "seating" and #c.t.seats < c.t.maxSeats) then return end
     c.t.seats[#c.t.seats + 1] = name
+    if asChatter then c.chatters[name] = true end
     broadcast(true); emit("state")
 end
 
@@ -200,7 +206,10 @@ function T.startGame()
         for _, p in ipairs(game(t).privateFor(t)) do
             local name = t.seats[p.seat]
             if ns.Rolls.same(name, ns.me()) then game(t).onPrivate(t, p.payload)
-            elseif not (ns.bots and ns.bots[name]) then ns.whisper(name, T.pack(c.tid, 0, "P", p.payload)) end
+            else
+                if not (ns.bots and ns.bots[name]) then ns.whisper(name, T.pack(c.tid, 0, "P", p.payload)) end
+                if c.chatters[name] then ns.sayTo(name, ns.Chat.holeLine(t, p.seat)) end
+            end
         end
     end
     hostChanged(c)
@@ -428,5 +437,30 @@ function T.onMessage(msg, sender)
         end
     elseif c and c.hosting and c.tid == tid and not mine then
         hostIntent(c, evt, sender, payload)
+    end
+end
+
+-- A party or raid line from someone, maybe without the addon. Only the host acts on it, and
+-- only on a whole-message command (Chat.parse).
+function T.chatCommand(sender, text)
+    local c = T.cur
+    if not (c and c.hosting and c.chat) or ns.Rolls.same(sender, ns.me()) then return end
+    local action, amount = ns.Chat.parse(text)
+    if not action then return end
+    local t = c.t
+    if action == "join" then
+        if seatOf(t, sender) then return end
+        if t.phase ~= "seating" or #t.seats >= t.maxSeats then
+            ns.say(("[GF] %s, the table is %s."):format(sender:match("^[^ %-]+"),
+                t.phase ~= "seating" and "already playing" or "full"))
+            return
+        end
+        c.chatters[sender] = true
+        hostIntent(c, "SIT", sender)
+    elseif action == "leave" then
+        hostIntent(c, "LEAVE", sender)
+    else
+        local seat = seatOf(t, sender)
+        if seat then T.hostAct(seat, action, amount) end
     end
 end

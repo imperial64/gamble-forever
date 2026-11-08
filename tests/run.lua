@@ -16,7 +16,7 @@ end
 
 -- One addon instance per simulated player: the pure files loaded into a fresh namespace.
 local function load(ns)
-    for _, f in ipairs({ "Rolls.lua", "Cards.lua", "Games.lua", "Blackjack.lua", "Poker.lua", "Table.lua", "Ledger.lua" }) do
+    for _, f in ipairs({ "Rolls.lua", "Cards.lua", "Games.lua", "Blackjack.lua", "Poker.lua", "Chat.lua", "Table.lua", "Ledger.lua" }) do
         assert(loadfile(ADDON .. f))("GambleForever", ns)
     end
     return ns
@@ -537,6 +537,96 @@ test("a host that changes the board is caught when the seed is revealed", functi
     P.clients["Talmika Waystalker"].Table.act("check"); P.flush()
     for _ = 1, 3 do P.clients["Talmika Waystalker"].Table.act("check"); P.flush(); host.Table.act("check"); P.flush() end
     check(P.count("Talmika Waystalker", "mismatch") >= 1, "Talmika's addon flags the board")
+end)
+
+print("Chat play")
+test("chat commands: whole messages only, amounts in gold unless spelled out", function()
+    local Chat = load({}).Chat
+    local function p(s) local a, n = Chat.parse(s); return tostring(a) .. "/" .. tostring(n) end
+    check(p("hit") == "hit/nil" and p("  Stand! ") == "stand/nil" and p("JOIN") == "join/nil", "single words")
+    check(p("all in") == "allin/nil" and p("allin") == "allin/nil", "all in")
+    check(p("raise 500") == "raise/5000000" and p("raise 50s") == "raise/5000" and p("raise to 1g 50s") == "raise/15000", "raise amounts")
+    check(p("raise") == "nil/nil" and p("raise lots") == "nil/nil", "raise needs an amount")
+    check(p("hit me baby") == "nil/nil" and p("call me later") == "nil/nil" and p("lol") == "nil/nil", "sentences are talk")
+    check(Chat.money(15050) == "1g 50s 50c" and Chat.money(0) == "0c", "plain coins")
+    local long = "[GF] " .. ("Somebody pays Someone 10g, "):rep(20)
+    for _, l in ipairs(Chat.fit(long)) do check(#l <= 255, "line fits: " .. #l) end
+end)
+
+-- a party where Bob has no addon: his lines reach only the host's chatCommand
+local function chatTable(names, opts)
+    local P = party(names)
+    local host = P.clients[names[1]]
+    P.said = {}
+    host.say = function(text) if text then assert(#text <= 255, "chat line over 255"); P.said[#P.said + 1] = text end end
+    host.sayTo = function(name, text) P.said[#P.said + 1] = "(to " .. name .. ") " .. text end
+    opts.chat = true
+    host.Table.open(opts)
+    P.flush()
+    local tid = host.Table.current().tid
+    for i = 2, #names do if names[i] ~= "Bob Noaddon" then P.clients[names[i]].Table.join(tid) end end
+    P.flush()
+    P.clients["Bob Noaddon"] = nil   -- Bob hears nothing; he only types
+    function P.bob(text) host.Table.chatCommand("Bob Noaddon", text); P.flush() end
+    function P.saidLike(pat) for _, l in ipairs(P.said) do if l:find(pat) then return l end end end
+    return P, host
+end
+
+test("a chat player joins Deathroll by typing join and is told when to roll", function()
+    local P, host = chatTable({ "Efe Imperial", "Bob Noaddon" }, { game = "deathroll", wager = 10000, start = 1000, maxSeats = 2, stamp = 21 })
+    check(P.saidLike("^%[GF%] Deathroll table open, wager 1g%. Type join"), "the table is announced")
+    P.bob("join")
+    local t = host.Table.current().t
+    check(#t.seats == 2 and t.seats[2] == "Bob Noaddon", "Bob is seated")
+    check(P.saidLike("Seated %(2/2%): Efe, Bob"), "seating is narrated")
+    host.Table.startGame(); P.flush(); P.serverRoll(2)   -- Bob goes first
+    check(P.saidLike("^%[GF%] Bob, /roll 1%-1000$"), "Bob is prompted with his range")
+    P.roll("Bob Noaddon", 1, 1, 1000); P.flush()
+    check(P.saidLike("^%[GF%] Efe wins%. Bob pays Efe 1g%.$"), "the result is narrated")
+    check(P.saidLike("Efe rolls for who goes first") and not P.saidLike("rolls %d"), "rolls are never narrated")
+    P.bob("join")
+    check(P.saidLike("Bob, the table is") == nil, "a seated player's join is ignored")
+end)
+
+test("Blackjack by chat: Bob sees the deal, hits, stands, and gets the result", function()
+    local P, host = chatTable({ "Dealer Person", "Bob Noaddon" }, { game = "blackjack", wager = 10000, maxSeats = 6, stamp = 22 })
+    P.bob("join")
+    host.Table.startGame()
+    dealCards(P, host, { "10h", "6d", "6s" })
+    check(P.saidLike("^%[GF%] Dealer shows 6d%. Bob: 10h 6s %(16%)%.$"), "the deal is narrated")
+    check(P.saidLike("^%[GF%] Bob: 10h 6s %(16%) vs 6d%. hit, stand, double%?$"), "Bob is prompted")
+    P.bob("hit, please")   -- talk, not a command
+    check(not host.Table.current().t.need, "a sentence does nothing")
+    P.bob("hit"); dealCards(P, host, { "4c" })
+    check(P.saidLike("Bob: 10h 6s 4c %(20%) vs 6d%. hit, stand%?"), "the new card shows in the next prompt")
+    P.bob("stand"); P.flush()
+    dealCards(P, host, { "Kh", "2c" })   -- dealer 6+10+2 = 18
+    check(P.saidLike("^%[GF%] Dealer: 6d Kh 2c %(18%)%. Bob wins 1g%.$"), "the result is narrated")
+end)
+
+test("Hold'em by chat: hole cards by whisper, prompts with amounts, raise in gold", function()
+    local P, host = chatTable({ "Efe Imperial", "Bob Noaddon" }, { game = "poker", wager = 10000, maxSeats = 6, stamp = 23 })
+    P.bob("join")
+    host.Table.startGame(); P.flush()
+    local t = host.Table.current().t
+    check(P.saidLike("^%(to Bob Noaddon%) %[GF%] Your cards for hand 1: %w+ %w+$"), "Bob's cards come by whisper")
+    check(t.toAct == 1, "heads-up: Efe (button, small blind) acts first")
+    host.Table.act("raise", 40000); P.flush()
+    check(P.saidLike("^%[GF%] Efe raises to 4g%.$"), "Efe's raise is narrated")
+    check(P.saidLike("^%[GF%] Bob, pot 5g: call 3g, raise 7g or more, allin, fold%?$"), "Bob is prompted")
+    P.bob("raise 10")
+    check(t.curBet == 100000 and t.toAct == 1, "Bob raised to 10g")
+    host.Table.act("call"); P.flush()
+    check(P.saidLike("^%[GF%] Flop: %w+ %w+ %w+%. Pot 20g%.$"), "the flop is narrated")
+    P.bob("fold")
+    check(t.phase == "done" and P.saidLike("^%[GF%] Efe wins 20g, everyone else folded%.$"), "the result is narrated")
+end)
+
+test("without chat play, chat lines do nothing", function()
+    local P, host = seated({ "Efe Imperial", "Talmika Waystalker" }, { game = "deathroll", wager = 100, start = 1000, maxSeats = 3, stamp = 24 })
+    host.say = function() error("narrated without chat play") end
+    host.Table.chatCommand("Bob Noaddon", "join"); P.flush()
+    check(#host.Table.current().t.seats == 2, "nobody sat")
 end)
 
 print("Ledger")
