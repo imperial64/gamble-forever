@@ -1,11 +1,11 @@
 ## Interface: 16001
-## Title: Deathroll
-## Notes: Sit at a real gambling table with your friends. /dr
+## Title: GambleForever
+## Notes: Sit at a real gambling table with your friends. /gf
 ## Version: @project-version@
 ## Author: imperial64
-## SavedVariables: DeathrollDB
+## SavedVariables: GambleForeverDB
 ## IconTexture: Interface\Icons\INV_Misc_Dice_02
-## AddonCompartmentFunc: Deathroll_OnAddonCompartmentClick
+## AddonCompartmentFunc: GambleForever_OnAddonCompartmentClick
 
 Rolls.lua
 Cards.lua

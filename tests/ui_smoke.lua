@@ -3,7 +3,7 @@
 -- It cannot tell you anything looks right; it catches nil calls and typos before the game does.
 -- Run: luajit tests/ui_smoke.lua
 local ROOT = arg and arg[0] and arg[0]:match("^(.*)[/\\]tests[/\\]") or "."
-local ADDON = ROOT .. "/addons/Deathroll/"
+local ADDON = ROOT .. "/addons/GambleForever/"
 local ME = "Efe Imperial"
 
 ---------------------------------------------------------------- stand-in client
@@ -105,9 +105,9 @@ print_ = print
 ---------------------------------------------------------------- load the addon
 
 local ns = {}
-local toc = io.open(ADDON .. "Deathroll.toc"):read("*a")
+local toc = io.open(ADDON .. "GambleForever.toc"):read("*a")
 for file in toc:gmatch("\n([%w_]+%.lua)") do
-    assert(loadfile(ADDON .. file))("Deathroll", ns)
+    assert(loadfile(ADDON .. file))("GambleForever", ns)
 end
 local function fire(ev, ...)
     for _, f in ipairs(frames) do
@@ -123,7 +123,7 @@ local function deliver()
     end
 end
 local function tick(n)
-    local view = _G.DeathrollTableView
+    local view = _G.GambleForeverTableView
     for _ = 1, n or 3 do
         deliver()
         local ts = timers; timers = {}
@@ -139,7 +139,7 @@ local function serverRolls()
     end
 end
 
-fire("ADDON_LOADED", "Deathroll")
+fire("ADDON_LOADED", "GambleForever")
 fire("PLAYER_LOGIN")
 tick()
 ns.UI.toggleLobby()
@@ -147,7 +147,7 @@ ns.UI.toggleLobby()
 local passed, failed = 0, 0
 local function play(cmd, decide)
     local ok, err = pcall(function()
-        SlashCmdList.DEATHROLL(cmd)
+        SlashCmdList.GAMBLEFOREVER(cmd)
         tick()
         ns.Table.startGame()
         for _ = 1, 400 do

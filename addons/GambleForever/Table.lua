@@ -182,7 +182,7 @@ function T.open(opts)
     emit("state")
 end
 
-function T.addBot(name)   -- /dr test: seats Core plays for
+function T.addBot(name)   -- /gf test: seats Core plays for
     local c = T.cur
     if not (c and c.hosting and c.t.phase == "seating" and #c.t.seats < c.t.maxSeats) then return end
     c.t.seats[#c.t.seats + 1] = name

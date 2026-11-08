@@ -1,4 +1,4 @@
--- Who owes whom. Pure: entries are { from, to, amount, left, t }. Core keeps them in DeathrollDB.
+-- Who owes whom. Pure: entries are { from, to, amount, left, t }. Core keeps them in GambleForeverDB.
 local _, ns = ...
 local Ledger = {}
 ns.Ledger = Ledger

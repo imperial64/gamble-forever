@@ -1,4 +1,4 @@
-"""Generates the table art the addon ships: addons/Deathroll/media/table.png.
+"""Generates the table art the addon ships: addons/GambleForever/media/table.png.
 
 A top-down oval card table: felt with grain and a soft light pool, a wooden rail with a gold
 inlay, transparent outside the rail. 1024x512 so the client can use it as one texture.
@@ -10,7 +10,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFilter
 
 W, H = 1024, 512
-OUT = Path(__file__).resolve().parent.parent / "addons" / "Deathroll" / "media" / "table.png"
+OUT = Path(__file__).resolve().parent.parent / "addons" / "GambleForever" / "media" / "table.png"
 
 
 def ellipse_mask(inset, blur=0):

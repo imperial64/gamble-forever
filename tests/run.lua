@@ -1,7 +1,7 @@
 -- Deathroll headless tests: the pure rules, the table protocol between simulated clients, and the ledger.
 -- Run: luajit tests/run.lua
 local ROOT = arg and arg[0] and arg[0]:match("^(.*)[/\\]tests[/\\]") or "."
-local ADDON = ROOT .. "/addons/Deathroll/"
+local ADDON = ROOT .. "/addons/GambleForever/"
 
 local passed, failed, current = 0, 0, ""
 local function check(ok, msg)
@@ -17,7 +17,7 @@ end
 -- One addon instance per simulated player: the pure files loaded into a fresh namespace.
 local function load(ns)
     for _, f in ipairs({ "Rolls.lua", "Cards.lua", "Games.lua", "Blackjack.lua", "Poker.lua", "Table.lua", "Ledger.lua" }) do
-        assert(loadfile(ADDON .. f))("Deathroll", ns)
+        assert(loadfile(ADDON .. f))("GambleForever", ns)
     end
     return ns
 end

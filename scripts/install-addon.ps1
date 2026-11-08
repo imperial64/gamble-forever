@@ -3,7 +3,7 @@
 param([string]$WowRoot = "F:\World of Warcraft")
 $ErrorActionPreference = "Stop"
 $repo = Split-Path -Parent $PSScriptRoot
-$src = Join-Path $repo "addons\Deathroll"
+$src = Join-Path $repo "addons\GambleForever"
 
 foreach ($f in Get-ChildItem $src -Filter *.lua) {
     luajit -bl $f.FullName | Out-Null
@@ -24,7 +24,7 @@ $smoke = $LASTEXITCODE
 Pop-Location
 if ($rules -ne 0 -or $smoke -ne 0) { Write-Error "Tests failed - not installing." }
 
-$dest = Join-Path $WowRoot "_forever_\Interface\AddOns\Deathroll"
+$dest = Join-Path $WowRoot "_forever_\Interface\AddOns\GambleForever"
 New-Item -ItemType Directory -Force $dest | Out-Null
 Copy-Item (Join-Path $src "*") $dest -Recurse -Force
 Write-Host "Installed -> $dest" -ForegroundColor Green

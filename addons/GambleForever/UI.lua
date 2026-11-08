@@ -297,7 +297,7 @@ local function buildPanels()
 end
 
 local function buildTable()
-    view = CreateFrame("Frame", "DeathrollTableView", nil)   -- no parent: stays visible while UIParent is hidden
+    view = CreateFrame("Frame", "GambleForeverTableView", nil)   -- no parent: stays visible while UIParent is hidden
     view:SetAllPoints(WorldFrame)
     view:SetFrameStrata("DIALOG")
     view:Hide()
@@ -865,7 +865,7 @@ local function refreshControls(c, t, mine)
         end
         W.pkAmount:SetText(W.raiseTo and ("to " .. ns.coins(W.raiseTo)) or "")
     end
-    W.music:SetLabel(DeathrollDB.settings.mute and "Music: off" or "Music: on")
+    W.music:SetLabel(GambleForeverDB.settings.mute and "Music: off" or "Music: on")
 end
 
 local function refresh()
@@ -1013,7 +1013,7 @@ end
 ---------------------------------------------------------------- lobby
 
 local function ledgerText()
-    local net = ns.Ledger.net(DeathrollDB.ledger, ns.me())
+    local net = ns.Ledger.net(GambleForeverDB.ledger, ns.me())
     local parts = {}
     for who, amt in pairs(net) do
         if amt > 0 then parts[#parts + 1] = ("%s owes you %s"):format(nm(who), ns.coins(amt))
@@ -1117,7 +1117,7 @@ local function refreshLobby()
     end
     L.empty:SetShown(#list == 0)
     L.chips:SetOn(L.chips.on)
-    L.immersive:SetOn(DeathrollDB.settings.immersive)
+    L.immersive:SetOn(GambleForeverDB.settings.immersive)
 end
 
 local function field(parent, label, value, x, y, w)
@@ -1178,7 +1178,7 @@ local function selectGame(id)
 end
 
 local function buildLobby()
-    lobby = CreateFrame("Frame", "DeathrollLobby", UIParent)
+    lobby = CreateFrame("Frame", "GambleForeverLobby", UIParent)
     lobby:SetSize(768, 480)
     lobby:SetPoint("CENTER")
     lobby:SetFrameStrata("HIGH")
@@ -1188,14 +1188,14 @@ local function buildLobby()
     lobby:SetScript("OnDragStop", lobby.StopMovingOrSizing)
     lobby:SetClampedToScreen(true)
     lobby:Hide()
-    tinsert(UISpecialFrames, "DeathrollLobby")
+    tinsert(UISpecialFrames, "GambleForeverLobby")
     local bg = lobby:CreateTexture(nil, "BACKGROUND")
     bg:SetTexture(art("frame"))
     bg:SetAllPoints()
 
     local title = font(lobby, MORPHEUS, 26, "OUTLINE", GOLD)
     title:SetPoint("TOP", 0, -14)
-    title:SetText("The Deathroll Tavern")
+    title:SetText("The Forever Tavern")
     local close = skinButton(lobby, "X", 28, 26, "dark", function() lobby:Hide() end, 14)
     close:SetPoint("TOPRIGHT", -16, -12)
 
@@ -1243,7 +1243,7 @@ local function buildLobby()
     L.empty:SetWidth(330)
     L.empty:SetText("No open tables yet.\n\nOpen one on the right, or ask the host to invite you to their group.")
     local practice = skinButton(left, "Practice vs bots", 150, 28, "dark", function()
-        SlashCmdList.DEATHROLL(PRACTICE[L.game])
+        SlashCmdList.GAMBLEFOREVER(PRACTICE[L.game])
     end, 13)
     practice:SetPoint("BOTTOMLEFT", 16, 14)
     local refreshBtn = skinButton(left, "Refresh", 100, 28, "dark", function() ns.Table.who(); refreshLobby() end, 13)
@@ -1295,15 +1295,15 @@ local function buildLobby()
     L.start = field(right, "START NUMBER", "1000", 136, -178, 112)
     L.chips = toggle(right, "Chips", 112)
     L.chips:SetPoint("TOPLEFT", 16, -232)
-    L.immersive = toggle(right, "Immersive", 112, function(on) DeathrollDB.settings.immersive = on end)
+    L.immersive = toggle(right, "Immersive", 112, function(on) GambleForeverDB.settings.immersive = on end)
     L.immersive:SetPoint("TOPLEFT", 136, -232)
     local open = skinButton(right, "Open Table", 232, 36, "gold", function()
-        if ns.Table.current() then print("|cffffd100Deathroll|r leave your current table first."); return end
+        if ns.Table.current() then print("|cffffd100GambleForever|r leave your current table first."); return end
         local g = ns.Games[L.game]
         local seatsN = L.seats:IsShown() and math.max(2, math.min(g.maxSeats, tonumber(L.seats:GetText()) or 2)) or g.maxSeats
         local wager = (tonumber(L.gold:GetText()) or 0) * 10000 + math.min(99, tonumber(L.silver:GetText()) or 0) * 100
             + math.min(99, tonumber(L.copper:GetText()) or 0)
-        if wager < 2 then print("|cffffd100Deathroll|r set a wager of at least 2 copper."); return end
+        if wager < 2 then print("|cffffd100GambleForever|r set a wager of at least 2 copper."); return end
         ns.Table.open({ game = L.game, wager = wager, start = tonumber(L.start:GetText()) or 1000,
             maxSeats = seatsN, chips = L.chips.on, stamp = time() })
     end, 18)
@@ -1388,7 +1388,7 @@ local reminder
 function UI.tradeReminder(partner)
     if not partner then if reminder then reminder:Hide() end; return end
     local amt
-    for who, a in pairs(ns.Ledger.net(DeathrollDB.ledger, ns.me())) do
+    for who, a in pairs(ns.Ledger.net(GambleForeverDB.ledger, ns.me())) do
         if ns.Rolls.same(who, partner) and a ~= 0 then amt = a end
     end
     if not amt or not TradeFrame then return end
@@ -1402,8 +1402,8 @@ function UI.tradeReminder(partner)
         reminder.text = font(reminder, FRIZ, 13, "OUTLINE", { .95, .9, .75 })
         reminder.text:SetPoint("CENTER")
     end
-    reminder.text:SetText(amt > 0 and ("Deathroll: %s owes you %s"):format(nm(partner), ns.coins(amt))
-        or ("Deathroll: |cffff7050you owe|r %s %s"):format(nm(partner), ns.coins(-amt)))
+    reminder.text:SetText(amt > 0 and ("GambleForever: %s owes you %s"):format(nm(partner), ns.coins(amt))
+        or ("GambleForever: |cffff7050you owe|r %s %s"):format(nm(partner), ns.coins(-amt)))
     reminder:Show()
 end
 
@@ -1458,7 +1458,7 @@ function UI.handle(what, ...)
     elseif what == "lobby" or what == "ledger" then
         refreshLobby()
     elseif what == "closed" then
-        print("|cffffd100Deathroll|r the host closed the table.")
+        print("|cffffd100GambleForever|r the host closed the table.")
         refreshLobby()
     elseif what == "leave" then
         refreshLobby()

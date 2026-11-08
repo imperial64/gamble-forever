@@ -6,7 +6,7 @@ Run: python scripts/fix-png.py
 import pathlib
 from PIL import Image
 
-media = pathlib.Path(__file__).resolve().parent.parent / "addons" / "Deathroll" / "media"
+media = pathlib.Path(__file__).resolve().parent.parent / "addons" / "GambleForever" / "media"
 for p in sorted(media.rglob("*.png")):
     head = p.read_bytes()[24:26]
     if head[0] == 8 and head[1] in (2, 6):

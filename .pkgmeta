@@ -1,8 +1,8 @@
 # BigWigs packager configuration (same setup as dynamic-ambiance-forever).
-package-as: Deathroll
+package-as: GambleForever
 
 move-folders:
-  Deathroll/addons/Deathroll: Deathroll
+  Deathroll/addons/GambleForever: GambleForever
 
 ignore:
   - mockup

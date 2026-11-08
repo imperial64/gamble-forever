@@ -1,9 +1,9 @@
 -- Wires the pure modules to the client: events, addon messages, rolls, ledger, slash command.
 local ADDON, ns = ...
-local PREFIX = "Deathroll"
+local PREFIX = "GambleForever"
 local rollPattern = ns.Rolls.pattern(RANDOM_ROLL_RESULT)
 local myFull           -- "Efe Imperial": learned from my own roll lines and addon echoes
-ns.bots = {}           -- /dr test seats
+ns.bots = {}           -- /gf test seats
 
 local function isSecret(v) return issecretvalue ~= nil and issecretvalue(v) or false end
 function ns.lockdown() return C_ChatInfo.InChatMessagingLockdown and C_ChatInfo.InChatMessagingLockdown() or false end
@@ -14,7 +14,7 @@ function ns.roll(lo, hi) RandomRoll(lo, hi) end
 function ns.seed()
     return ("%d-%d-%d"):format(math.random(1, 2 ^ 30), math.floor(GetTime() * 1000), math.random(1, 2 ^ 30))
 end
-ns.media = "Interface\\AddOns\\Deathroll\\media\\"
+ns.media = "Interface\\AddOns\\GambleForever\\media\\"
 
 -- Amounts are copper everywhere (wagers, ledger, trades). Shown with the game's coin icons.
 function ns.coins(copper)
@@ -29,7 +29,7 @@ function ns.coins(copper)
 end
 
 function ns.sound(name)
-    if DeathrollDB and DeathrollDB.settings.mute then return end
+    if GambleForeverDB and GambleForeverDB.settings.mute then return end
     PlaySoundFile(ns.media .. "sfx\\" .. name .. ".ogg", "SFX")
 end
 
@@ -152,7 +152,7 @@ function ns.emit(what, ...)
         if not t.chips then
             for _, d in ipairs(debts) do
                 if ns.Rolls.same(d.from, ns.me()) or ns.Rolls.same(d.to, ns.me()) then
-                    ns.Ledger.add(DeathrollDB.ledger, d.from, d.to, d.amount, time())
+                    ns.Ledger.add(GambleForeverDB.ledger, d.from, d.to, d.amount, time())
                 end
             end
         end
@@ -189,11 +189,11 @@ local function onTrade(ev, ...)
     elseif ev == "UI_INFO_MESSAGE" then
         local kind = ...
         if kind == LE_GAME_ERR_TRADE_COMPLETE and trade.partner then
-            local L = DeathrollDB.ledger
+            local L = GambleForeverDB.ledger
             local paid = 0
             if (trade.give or 0) > 0 then paid = paid + ns.Ledger.pay(L, ns.me(), trade.partner, trade.give) end
             if (trade.get or 0) > 0 then paid = paid + ns.Ledger.pay(L, trade.partner, ns.me(), trade.get) end
-            if paid > 0 then print(("|cffffd100Deathroll|r ledger: %s with %s marked paid."):format(ns.coins(paid), trade.partner)) end
+            if paid > 0 then print(("|cffffd100GambleForever|r ledger: %s with %s marked paid."):format(ns.coins(paid), trade.partner)) end
             trade = {}
             ns.UI.handle("ledger")
         end
@@ -214,8 +214,8 @@ end
 f:SetScript("OnEvent", function(_, ev, ...)
     if ev == "ADDON_LOADED" then
         if ... ~= ADDON then return end
-        DeathrollDB = DeathrollDB or {}
-        local db = DeathrollDB
+        GambleForeverDB = GambleForeverDB or {}
+        local db = GambleForeverDB
         db.ledger = db.ledger or {}
         if db.ledgerUnit ~= "copper" then   -- the first build kept whole gold
             for _, e in ipairs(db.ledger) do e.amount, e.left = e.amount * 10000, e.left * 10000 end
@@ -262,11 +262,11 @@ local BOT_NAMES = { "Grizzlenut Sparkfuse", "Thoradin Ironbrew", "Mirabelle Ashv
     "Fennick Brightwhisk", "Dorn Stonehelm", "Ysolde Fairwind", "Halvar Deepforge", "Sirelle Dawnmere",
     "Bramble Tinkerspan", "Ostrik Gravelmaw", "Velia Starfall" }
 
-SLASH_DEATHROLL1 = "/dr"
-SLASH_DEATHROLL2 = "/deathroll"
-SlashCmdList.DEATHROLL = function(m)
+SLASH_GAMBLEFOREVER1 = "/gf"
+SLASH_GAMBLEFOREVER2 = "/gamble"
+SlashCmdList.GAMBLEFOREVER = function(m)
     local cmd, a, b = strsplit(" ", (m or ""):lower())
-    if cmd == "test" then   -- /dr test [bots] [deathroll|highlow|coinflip|blackjack|poker]
+    if cmd == "test" then   -- /gf test [bots] [deathroll|highlow|coinflip|blackjack|poker]
         if ns.Table.current() then ns.Table.close() end
         local gameId = ns.Games[b or ""] and b or "deathroll"
         local g = ns.Games[gameId]
@@ -287,4 +287,4 @@ SlashCmdList.DEATHROLL = function(m)
 end
 
 -- addon compartment (minimap drawer)
-function Deathroll_OnAddonCompartmentClick() ns.UI.toggleLobby() end
+function GambleForever_OnAddonCompartmentClick() ns.UI.toggleLobby() end

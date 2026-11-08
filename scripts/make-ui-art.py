@@ -1,5 +1,5 @@
 """Generates the lobby and button art in the mockup's style (dark wood, gold trim, parchment,
-red and gold buttons). Writes into addons/Deathroll/media/ui/.
+red and gold buttons). Writes into addons/GambleForever/media/ui/.
 Run once: python scripts/make-ui-art.py
 """
 import random
@@ -7,7 +7,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFilter
 
-OUT = Path(__file__).resolve().parent.parent / "addons" / "Deathroll" / "media" / "ui"
+OUT = Path(__file__).resolve().parent.parent / "addons" / "GambleForever" / "media" / "ui"
 GOLD, GOLD_DK, INK = (201, 162, 39), (138, 106, 18), (14, 8, 4)
 
 
