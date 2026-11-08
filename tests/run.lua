@@ -16,7 +16,7 @@ end
 
 -- One addon instance per simulated player: the pure files loaded into a fresh namespace.
 local function load(ns)
-    for _, f in ipairs({ "Rolls.lua", "Games.lua", "Table.lua", "Ledger.lua" }) do
+    for _, f in ipairs({ "Rolls.lua", "Cards.lua", "Games.lua", "Blackjack.lua", "Poker.lua", "Table.lua", "Ledger.lua" }) do
         assert(loadfile(ADDON .. f))("Deathroll", ns)
     end
     return ns
@@ -25,7 +25,7 @@ end
 -- A party: every client receives every message (sender included) in order, timers run on
 -- flush, and a roll is heard by everyone as the server's line.
 local function party(names)
-    local P = { clients = {}, timers = {}, events = {}, queue = {}, sent = {} }
+    local P = { clients = {}, timers = {}, slow = {}, events = {}, queue = {}, sent = {} }
     for _, name in ipairs(names) do
         local ns = load({})
         ns.me = function() return name end
@@ -34,7 +34,16 @@ local function party(names)
             P.queue[#P.queue + 1] = { msg = msg, from = name }
             P.sent[#P.sent + 1] = msg
         end
-        ns.after = function(_, fn) P.timers[#P.timers + 1] = fn end
+        ns.whisper = function(target, msg)
+            assert(#msg <= 255, "whisper over 255 bytes: " .. #msg)
+            P.queue[#P.queue + 1] = { msg = msg, from = name, to = target }
+        end
+        P.seedN = 0
+        ns.seed = function() P.seedN = P.seedN + 1; return "seed" .. P.seedN end
+        -- flush runs short timers at once; long ones (the host's 4 s roll retry) wait for runSlow
+        ns.after = function(sec, fn)
+            if sec >= 3 then P.slow[#P.slow + 1] = fn else P.timers[#P.timers + 1] = fn end
+        end
         ns.roll = function(lo, hi) P.pendingRoll = { name = name, lo = lo, hi = hi } end
         ns.emit = function(what, ...) P.events[#P.events + 1] = { who = name, what = what, args = { ... } } end
         P.clients[name] = ns
@@ -46,7 +55,9 @@ local function party(names)
             for _, fn in ipairs(ts) do fn() end
             while #P.queue > 0 do
                 local m = table.remove(P.queue, 1)
-                for _, ns in pairs(P.clients) do ns.Table.onMessage(m.msg, m.from) end
+                for name, ns in pairs(P.clients) do
+                    if not m.to or name == m.to then ns.Table.onMessage(m.msg, m.from) end
+                end
             end
         end
         error("flush did not settle")
@@ -266,7 +277,7 @@ test("only the host's state counts; strangers cannot seat anyone", function()
     local before = guest.Table.current().seq
     local fake = { game = "deathroll", wager = 999999, maxSeats = 2, phase = "seating", rosterVer = 1, seats = { "Mallory Liar", "Talmika Waystalker" } }
     liar.Games.deathroll.setup(fake, { start = 100 })
-    liar.send(liar.Table.pack(tid, 9999, "S", liar.Table.encode(fake)))
+    liar.send(liar.Table.pack(tid, 9999, "S", "1;1;" .. liar.Table.encode(fake)))
     liar.send(liar.Table.pack(tid, 0, "R", "1;1;1;Mallory Liar,Talmika Waystalker"))
     P.flush()
     check(guest.Table.current().t.wager == 100 and guest.Table.current().seq == before, "forged state applied")
@@ -276,7 +287,7 @@ test("a host reporting a roll nobody saw raises a mismatch", function()
     host.Table.startGame(); P.flush(); P.serverRoll(1)
     local c = host.Table.current()
     c.t.history[#c.t.history + 1] = 2; c.t.cur = 2; c.t.turn = 2
-    host.send(host.Table.pack(c.tid, c.seq + 1, "S", host.Table.encode(c.t)))
+    host.send(host.Table.pack(c.tid, c.seq + 1, "S", "1;1;" .. host.Table.encode(c.t)))
     P.flush()
     check(P.count("Talmika Waystalker", "mismatch") == 1, "guest flags the invented roll")
 end)
@@ -321,7 +332,219 @@ test("40 players can sit at a High-Low table; every message fits", function()
     check(d[1].from == "Host Person" and d[1].to == names[40] and d[1].amount == 39000, "1 pays 40 the difference")
 end)
 
+print("Cards")
+test("a shoe hands out the n-th remaining card and never the same card twice", function()
+    local C = load({}).Cards
+    local shoe = C.newShoe(1)
+    check(C.draw(shoe, 1) == 0 and shoe.left == 51, "first card of a fresh deck is 2 of hearts")
+    check(C.draw(shoe, 1) == 1, "the next first card is the 3 of hearts")
+    check(C.draw(shoe, 50) == 51 and shoe.left == 49, "the last card is the ace of spades")
+    check(C.draw(shoe, 50) == nil, "beyond the cards left is refused")
+    local seen = {}
+    while shoe.left > 0 do
+        local c = C.draw(shoe, math.floor(shoe.left / 2) + 1)
+        check(not seen[c], "duplicate card " .. tostring(c))
+        seen[c] = true
+    end
+    local six = C.newShoe(6)
+    for _ = 1, 100 do C.draw(six, 7) end
+    local back = C.unpackShoe(C.packShoe(six))
+    check(back.left == 212 and C.packShoe(back) == C.packShoe(six), "six-deck shoe round-trips")
+end)
+test("seeded shuffle is a fixed permutation; the fingerprint changes with the seed", function()
+    local C = load({}).Cards
+    local a, b = C.shuffle("x1"), C.shuffle("x1")
+    local seen, same = {}, true
+    for i = 1, 52 do seen[a[i]] = true; if a[i] ~= b[i] then same = false end end
+    local count = 0
+    for _ in pairs(seen) do count = count + 1 end
+    check(same and count == 52, "same seed, same deck, all 52 cards")
+    check(C.commit("x1") ~= C.commit("x2") and #C.commit("x1") == 16, "fingerprints differ")
+end)
+test("hand ranking", function()
+    local C = load({}).Cards
+    local function h(spec)   -- "As Kd 10c ..."
+        local out = {}
+        local V = { A = 14, K = 13, Q = 12, J = 11 }
+        local S = { h = 1, d = 2, c = 3, s = 4 }
+        for r, s in spec:gmatch("(%w-)([hdcs])%f[%s%z]") do out[#out + 1] = C.make(V[r] or tonumber(r), S[s]) end
+        return C.eval(out)
+    end
+    check(C.handName(h("As Ks Qs Js 10s 2d 3c")) == "Royal flush", "royal")
+    check(h("Ah 2d 3c 4s 5h 9d Kc")[1] == 5 and h("Ah 2d 3c 4s 5h 9d Kc")[2] == 5, "wheel is a 5-high straight")
+    check(C.cmp(h("Kh Kd Kc 2s 2h 9d 8c"), h("Ah Qh 9h 4h 2h Kd 3c")) == 1, "full house beats flush")
+    check(C.cmp(h("Ah Ad Kc Ks 9d 3c 2h"), h("Ah Ad Kc Ks 8d 3c 2h")) == 1, "two pair, kicker decides")
+    check(C.cmp(h("Ah Ad Kc Ks Qd Qc 2h"), h("Ah Ad Kc Ks Jd 3c 2h")) == 1, "three pairs: best two plus the third as kicker")
+    check(h("7h 7d 7c 7s 2d 3c Kh")[3] == 13, "quads with king kicker")
+    check(C.cmp(h("9h 8h 7h 6h 5h 2d 2c"), h("Ah Ad Ac As Kd 3c 2h")) == 1, "straight flush beats quads")
+end)
+
+print("Coinflip")
+test("the host's addon flips; the loser pays the wager", function()
+    local P, host = seated({ "Efe Imperial", "Talmika Waystalker" }, { game = "coinflip", wager = 1234, stamp = 7 })
+    host.Table.startGame(); P.flush()
+    check(P.pendingRoll and P.pendingRoll.name == "Efe Imperial" and P.pendingRoll.hi == 2, "host flips 1-2")
+    P.serverRoll(2)
+    local d = P.last("Talmika Waystalker", "settled").args[2]
+    check(d[1].from == "Efe Imperial" and d[1].to == "Talmika Waystalker" and d[1].amount == 1234, "tails wins")
+end)
+
+print("Blackjack")
+-- deal by naming the card each roll must produce; the test finds the roll value for it
+local function rollFor(ns, card)
+    local shoe = ns.Table.current().t.shoe
+    local n = 0
+    for i = 1, shoe.decks * 52 do
+        if not shoe.removed[i] then
+            n = n + 1
+            if (i - 1) % 52 == card then return n end
+        end
+    end
+end
+local function dealCards(P, host, cards)
+    local C = host.Cards
+    for _, spec in ipairs(cards) do
+        P.flush()
+        assert(P.pendingRoll, "dealer did not roll for " .. spec)
+        local v, s = spec:match("^(%w-)([hdcs])$")
+        local V = { A = 14, K = 13, Q = 12, J = 11 }
+        local card = C.make(V[v] or tonumber(v), ({ h = 1, d = 2, c = 3, s = 4 })[s])
+        P.serverRoll(rollFor(host, card))
+    end
+    P.flush()
+end
+test("a full hand: deal, hit, stand, the dealer draws to 17; the shoe keeps count", function()
+    local P, host = seated({ "Dealer Person", "Efe Imperial", "Talmika Waystalker" }, { game = "blackjack", wager = 1000, maxSeats = 6, stamp = 8 })
+    local efe, tal = P.clients["Efe Imperial"], P.clients["Talmika Waystalker"]
+    host.Table.startGame()
+    -- order: Efe, Talmika, dealer upcard, Efe, Talmika (no hole card)
+    dealCards(P, host, { "10h", "9c", "6d", "6s", "Kd" })
+    local t = efe.Table.current().t
+    check(t.phase == "playing" and t.turn[1] == 2, "Efe to act on 16")
+    check(t.shoe.left == 312 - 5, "five cards out of the shoe on every client")
+    check(efe.Table.myActions() and efe.Table.myActions().hit and not tal.Table.myActions(), "only Efe may act")
+    efe.Table.act("hit"); dealCards(P, host, { "4c" })   -- 20, auto-stands? no: 20 waits
+    check(efe.Table.current().t.turn[1] == 2, "Efe still to act on 20")
+    efe.Table.act("stand"); P.flush()
+    check(tal.Table.myActions() ~= nil, "Talmika's turn")
+    tal.Table.act("stand"); P.flush()
+    dealCards(P, host, { "5h", "Qs" })   -- dealer 6+5 = 11, +10 = 21
+    local d = P.last("Efe Imperial", "settled").args[2]
+    check(#d == 2 and d[1].from == "Efe Imperial" and d[1].to == "Dealer Person" and d[1].amount == 1000, "Efe's 20 loses to 21")
+    check(d[2].from == "Talmika Waystalker" and d[2].amount == 1000, "Talmika's 19 loses")
+    check(P.count("Talmika Waystalker", "mismatch") == 0, "honest dealer, no mismatch")
+end)
+test("blackjack pays 3:2, a split plays two hands, a double takes one card", function()
+    local P, host = seated({ "Dealer Person", "Efe Imperial", "Talmika Waystalker" }, { game = "blackjack", wager = 1000, maxSeats = 6, stamp = 9 })
+    local efe, tal = P.clients["Efe Imperial"], P.clients["Talmika Waystalker"]
+    host.Table.startGame()
+    dealCards(P, host, { "Ah", "8c", "9d", "Kh", "8d" })   -- Efe blackjack, Talmika 8 8, dealer 9
+    check(tal.Table.myActions().split, "Talmika may split eights")
+    tal.Table.act("split"); dealCards(P, host, { "2h", "3c" })   -- 8+2, 8+3
+    tal.Table.act("double"); dealCards(P, host, { "Kc" })        -- 20, doubled
+    check(tal.Table.current().t.turn[2] == 2, "second split hand")
+    tal.Table.act("stand"); P.flush()
+    dealCards(P, host, { "7h", "Ad" })                           -- dealer 9+7 = 16, +A = 17
+    local t = host.Table.current().t
+    check(t.results[2] == 1500, "blackjack pays 1.5x")
+    check(t.results[3] == 2000 - 1000, "doubled 20 wins 2x, 11 loses 1x")
+end)
+test("a dealer that reports a card the roll did not draw is caught", function()
+    local P, host = seated({ "Dealer Person", "Efe Imperial" }, { game = "blackjack", wager = 100, maxSeats = 6, stamp = 10 })
+    host.Table.startGame()
+    dealCards(P, host, { "10h", "6d", "6s" })
+    local c = host.Table.current()
+    -- the dealer swaps Efe's 6 for an ace without a roll, then sends that state
+    local fake = c.t.hands[2][1].cards
+    fake[2] = host.Cards.make(14, 1)
+    c.t.shoe.removed[1] = true
+    host.send(host.Table.pack(c.tid, c.seq + 1, "S", "1;1;" .. host.Table.encode(c.t)))
+    P.flush()
+    check(P.count("Efe Imperial", "mismatch") >= 1, "Efe's addon flags it")
+end)
+
+test("practice table: the house deals and the host plays a hand too", function()
+    local P = party({ "Efe Imperial" })
+    local host = P.clients["Efe Imperial"]
+    host.Table.open({ game = "blackjack", wager = 100, maxSeats = 6, chips = true, practice = true, stamp = 15 })
+    host.Table.addBot("Grizzlenut Sparkfuse")
+    P.flush()
+    host.Table.startGame()
+    dealCards(P, host, { "10h", "9c", "6d", "7s", "8d" })   -- Efe 17, bot 17, dealer 6
+    check(host.Table.myActions() ~= nil, "the host has a hand to play")
+    host.Table.act("stand"); P.flush()
+    host.Table.hostAct(2, "stand"); P.flush()
+    dealCards(P, host, { "Kh" })   -- dealer 16, draws again
+    dealCards(P, host, { "5c" })   -- 21
+    local t = host.Table.current().t
+    check(t.phase == "done" and t.results[1] == -100 and t.results[2] == -100, "both 17s lose to 21")
+    check(#host.Games.blackjack.debts(t) == 1, "only the bot's hand makes a debt; the house never owes itself")
+end)
+
+print("Texas Hold'em")
+test("hole cards stay private; a hand plays to showdown; everyone verifies the deal", function()
+    local P, host = seated({ "Efe Imperial", "Talmika Waystalker", "Nox Aeterna" }, { game = "poker", wager = 100, maxSeats = 6, stamp = 11 })
+    local tal, nox = P.clients["Talmika Waystalker"], P.clients["Nox Aeterna"]
+    host.Table.startGame(); P.flush()
+    local ht = host.Table.current().t
+    local tt, nt = tal.Table.current().t, nox.Table.current().t
+    check(tt.myHole and tt.myHole[1] == ht.holes[2][1] and tt.myHole[2] == ht.holes[2][2], "Talmika got her two cards")
+    check(nt.myHole and nt.myHole[1] == ht.holes[3][1], "Nox got his")
+    check(tt.holes == nil and not tostring(tt.myHole[1]):find(tostring(nt.myHole[1]) .. "x"), "guests do not hold the deck")
+    check(ht.button == 1 and ht.sbSeat == 2 and ht.bbSeat == 3 and ht.toAct == 1, "button Efe, blinds Talmika and Nox, Efe first")
+    local function act(name, a, amt) P.clients[name].Table.act(a, amt); P.flush() end
+    act("Efe Imperial", "call")
+    act("Talmika Waystalker", "call")
+    act("Nox Aeterna", "check")
+    check(#tal.Table.current().t.board == 3 and tal.Table.current().t.street == "flop", "flop dealt to everyone")
+    for _, street in ipairs({ "flop", "turn", "river" }) do
+        act("Talmika Waystalker", "check"); act("Nox Aeterna", "check"); act("Efe Imperial", "check")
+    end
+    local t = nox.Table.current().t
+    check(t.phase == "done" and t.reveal and #t.board == 5, "showdown reached, seed revealed")
+    check(P.count("Nox Aeterna", "mismatch") == 0 and P.count("Talmika Waystalker", "mismatch") == 0, "deal verified")
+    local total = 0
+    for _, d in ipairs(P.last("Nox Aeterna", "settled").args[2]) do total = total + d.amount end
+    check(total > 0 and total <= 300, "the pot of 300 moves through the ledger")
+end)
+test("a fold ends the hand; raises reopen the action", function()
+    local P, host = seated({ "Efe Imperial", "Talmika Waystalker" }, { game = "poker", wager = 100, maxSeats = 6, stamp = 12 })
+    host.Table.startGame(); P.flush()
+    local t = host.Table.current().t
+    check(t.sbSeat == 1 and t.toAct == 1, "heads-up: the button posts the small blind and acts first")
+    host.Table.act("raise", 400); P.flush()
+    check(t.curBet == 400 and t.toAct == 2, "raise to 400")
+    P.clients["Talmika Waystalker"].Table.act("raise", 1200); P.flush()
+    check(t.curBet == 1200 and t.toAct == 1, "re-raise reopens Efe")
+    host.Table.act("fold"); P.flush()
+    local d = P.last("Talmika Waystalker", "settled").args[2]
+    check(t.phase == "done" and d[1].from == "Efe Imperial" and d[1].amount == 400, "Efe loses the 400 he put in")
+end)
+test("all in for 100 big blinds runs the board out", function()
+    local P, host = seated({ "Efe Imperial", "Talmika Waystalker" }, { game = "poker", wager = 100, maxSeats = 6, stamp = 13 })
+    host.Table.startGame(); P.flush()
+    host.Table.act("allin"); P.flush()
+    P.clients["Talmika Waystalker"].Table.act("call"); P.flush()
+    local t = P.clients["Talmika Waystalker"].Table.current().t
+    check(t.phase == "done" and #t.board == 5 and t.total[1] == 10000 and t.total[2] == 10000, "both all in for 10000, board run out")
+end)
+test("a host that changes the board is caught when the seed is revealed", function()
+    local P, host = seated({ "Efe Imperial", "Talmika Waystalker" }, { game = "poker", wager = 100, maxSeats = 6, stamp = 14 })
+    host.Table.startGame(); P.flush()
+    local t = host.Table.current().t
+    t.fullBoard[1] = (t.fullBoard[1] + 1) % 52
+    host.Table.act("call"); P.flush()
+    P.clients["Talmika Waystalker"].Table.act("check"); P.flush()
+    for _ = 1, 3 do P.clients["Talmika Waystalker"].Table.act("check"); P.flush(); host.Table.act("check"); P.flush() end
+    check(P.count("Talmika Waystalker", "mismatch") >= 1, "Talmika's addon flags the board")
+end)
+
 print("Ledger")
+test("settleNet: fewest payments from net results", function()
+    local L = load({}).Ledger
+    local d = L.settleNet({ A = 300, B = -200, C = -100, D = 0 })
+    check(#d == 2 and d[1].from == "B" and d[1].to == "A" and d[1].amount == 200 and d[2].from == "C" and d[2].amount == 100, "two payments")
+end)
 test("net, full and partial payment", function()
     local ns = load({}); local L = ns.Ledger
     local e = {}

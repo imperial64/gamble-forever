@@ -10,6 +10,10 @@ function ns.lockdown() return C_ChatInfo.InChatMessagingLockdown and C_ChatInfo.
 function ns.me() return myFull or UnitName("player") end
 function ns.after(sec, fn) C_Timer.After(sec, fn) end
 function ns.roll(lo, hi) RandomRoll(lo, hi) end
+-- poker deck seed: secret until the hand ends
+function ns.seed()
+    return ("%d-%d-%d"):format(math.random(1, 2 ^ 30), math.floor(GetTime() * 1000), math.random(1, 2 ^ 30))
+end
 ns.media = "Interface\\AddOns\\Deathroll\\media\\"
 
 -- Amounts are copper everywhere (wagers, ledger, trades). Shown with the game's coin icons.
@@ -37,12 +41,25 @@ local queue, ticking = {}, false
 local function channel()
     if IsInRaid() then return "RAID" elseif IsInGroup() then return "PARTY" end
 end
+-- Whisper target for a seated player: the character name the client knows for their unit
+-- (with a realm if one is attached), else the first word of the name shown on rolls.
+local function whisperTarget(name)
+    local u = ns.Scene.unitFor(name)
+    if u then
+        local n, realm = UnitName(u)
+        if n then return realm and realm ~= "" and (n .. "-" .. realm) or n end
+    end
+    return name:match("^[^ ]+")
+end
+
 local function pump()
     ticking = false
     while #queue > 0 do
         local m = queue[1]
-        local ch = channel()
-        local res = C_ChatInfo.SendAddonMessage(PREFIX, m.msg, ch or "WHISPER", not ch and UnitName("player") or nil)
+        local ch, target = channel(), nil
+        if m.to then ch, target = "WHISPER", whisperTarget(m.to)
+        elseif not ch then ch, target = "WHISPER", UnitName("player") end
+        local res = C_ChatInfo.SendAddonMessage(PREFIX, m.msg, ch, target)
         if res ~= nil and res ~= 0 and res ~= true then
             m.tries = m.tries + 1
             if m.tries > 30 then table.remove(queue, 1) end
@@ -57,15 +74,58 @@ function ns.send(msg)
     queue[#queue + 1] = { msg = msg, tries = 0 }
     if not ticking then pump() end
 end
+function ns.whisper(name, msg)
+    queue[#queue + 1] = { msg = msg, tries = 0, to = name }
+    if not ticking then pump() end
+end
 
 ---------------------------------------------------------------- events from the pure modules
 
--- Practice bots roll whenever the rules let them; one roll per step each.
+-- Practice bots: they roll whenever the rules let them, and play cards with simple habits.
 local botStep = {}
+
+local function bjChoice(t, seat, can)
+    local hand = t.hands[seat][t.turn[2]]
+    local total = ns.Games.blackjack.total(hand.cards)
+    local uv = t.dealer.cards[1] and ns.Cards.value(t.dealer.cards[1]) or 10
+    local up = uv == 14 and 11 or math.min(uv, 10)
+    if can.split and ns.Cards.value(hand.cards[1]) == 14 then return "split" end
+    if can.double and (total == 10 or total == 11) then return "double" end
+    if total <= 11 or (total <= 16 and up >= 7) then return "hit" end
+    return "stand"
+end
+
+local function pokerChoice(t, can)
+    local r = math.random()
+    if can.check then
+        if r < .2 then return "raise", can.minTo end
+        return "check"
+    end
+    if can.toCall <= 3 * t.bb then return r < .85 and "call" or "fold" end
+    return r < .4 and "call" or "fold"
+end
+
 local function botTurn()
     local c = ns.Table.current()
     if not (c and c.hosting) then return end
     local g, t = ns.Games[c.t.game], c.t
+    if g.actions then
+        for seat, name in ipairs(t.seats) do
+            local can = ns.bots[name] and g.actions(t, seat)
+            local step = table.concat({ t.round or 0, t.phase, t.street or "", seat, t.draws or 0, t.curBet or 0,
+                t.turn and t.turn[2] or 0, t.need and 1 or 0 }, ":")
+            if can and botStep[name] ~= step then
+                botStep[name] = step
+                C_Timer.After(1 + math.random(), function()
+                    if ns.Table.current() ~= c or not g.actions(t, seat) then return end
+                    local now = g.actions(t, seat)
+                    if t.game == "blackjack" then ns.Table.hostAct(seat, bjChoice(t, seat, now))
+                    else ns.Table.hostAct(seat, pokerChoice(t, now)) end
+                end)
+            end
+        end
+        return
+    end
     for name in pairs(ns.bots) do
         local lo, hi = g.rangeFor(t, name)
         local step = table.concat({ t.round or 0, t.phase, t.cur or 0, tostring(t.tieRolls) }, ":")
@@ -201,11 +261,11 @@ SLASH_DEATHROLL1 = "/dr"
 SLASH_DEATHROLL2 = "/deathroll"
 SlashCmdList.DEATHROLL = function(m)
     local cmd, a, b = strsplit(" ", (m or ""):lower())
-    if cmd == "test" then   -- /dr test [bots] [deathroll|highlow]
+    if cmd == "test" then   -- /dr test [bots] [deathroll|highlow|coinflip|blackjack|poker]
         if ns.Table.current() then ns.Table.close() end
         local gameId = ns.Games[b or ""] and b or "deathroll"
         local g = ns.Games[gameId]
-        ns.Table.open({ game = gameId, wager = 2550, start = 1000, maxSeats = g.maxSeats, chips = true, stamp = time() })   -- 25s 50c
+        ns.Table.open({ game = gameId, wager = 2550, start = 1000, maxSeats = g.maxSeats, chips = true, practice = true, stamp = time() })   -- 25s 50c
         for i = 1, math.min(tonumber(a) or 1, g.maxSeats - 1, #BOT_NAMES) do
             ns.bots[BOT_NAMES[i]] = true
             ns.Table.addBot(BOT_NAMES[i])

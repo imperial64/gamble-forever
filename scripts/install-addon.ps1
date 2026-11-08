@@ -9,8 +9,13 @@ foreach ($f in Get-ChildItem $src -Filter *.lua) {
     luajit -bl $f.FullName | Out-Null
     if ($LASTEXITCODE -ne 0) { Write-Error "Lua syntax error in $($f.Name) - not installing." }
 }
-luajit (Join-Path $repo "tests\run.lua") | Select-Object -Last 1
-if ($LASTEXITCODE -ne 0) { Write-Error "Tests failed - not installing." }
+Push-Location $repo
+luajit tests/run.lua | Select-Object -Last 1
+$rules = $LASTEXITCODE
+luajit tests/ui_smoke.lua | Select-Object -Last 1
+$smoke = $LASTEXITCODE
+Pop-Location
+if ($rules -ne 0 -or $smoke -ne 0) { Write-Error "Tests failed - not installing." }
 
 $dest = Join-Path $WowRoot "_forever_\Interface\AddOns\Deathroll"
 New-Item -ItemType Directory -Force $dest | Out-Null

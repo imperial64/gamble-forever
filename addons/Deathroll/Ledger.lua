@@ -8,6 +8,28 @@ function Ledger.add(entries, from, to, amount, when)
     entries[#entries + 1] = { from = from, to = to, amount = amount, left = amount, t = when }
 end
 
+-- Turn each player's net result for a hand ({ name = +won / -lost }) into who pays whom:
+-- the biggest loser pays the biggest winner first, so there are as few payments as possible.
+function Ledger.settleNet(net)
+    local winners, losers = {}, {}
+    for name, v in pairs(net) do
+        if v > 0 then winners[#winners + 1] = { name = name, v = v }
+        elseif v < 0 then losers[#losers + 1] = { name = name, v = -v } end
+    end
+    local byV = function(a, b) if a.v ~= b.v then return a.v > b.v end return a.name < b.name end
+    table.sort(winners, byV); table.sort(losers, byV)
+    local debts, w = {}, 1
+    for _, l in ipairs(losers) do
+        while l.v > 0 and winners[w] do
+            local p = math.min(l.v, winners[w].v)
+            debts[#debts + 1] = { from = l.name, to = winners[w].name, amount = p }
+            l.v, winners[w].v = l.v - p, winners[w].v - p
+            if winners[w].v == 0 then w = w + 1 end
+        end
+    end
+    return debts
+end
+
 -- Net per counterpart: positive means they owe me, negative means I owe them.
 function Ledger.net(entries, me)
     local out = {}

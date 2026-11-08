@@ -1,25 +1,24 @@
 -- Tables over addon messages. The host owns seating and broadcasts the table state; every client
 -- applies the server's /roll lines itself with the same rules, so a host cannot invent results.
 --
--- Pure apart from hooks Core sets: ns.send(msg), ns.me(), ns.roll(lo, hi), ns.after(sec, fn).
--- ns.emit(what, ...) tells the UI what happened:
---   "enter" "leave" "closed" "state" "lobby" "event"(ev) "settled"(t, debts) "mismatch"(value)
+-- Pure apart from hooks Core sets: ns.send(msg), ns.whisper(name, msg), ns.me(), ns.roll(lo, hi),
+-- ns.after(sec, fn), ns.seed(). ns.emit(what, ...) tells the UI what happened:
+--   "enter" "leave" "closed" "state" "lobby" "event"(ev) "settled"(t, debts) "mismatch"(what)
 --
--- Message: "1;<tableId>;<seq>;<EVT>;<payload>"
---   OPEN  host -> group   game;wager;maxSeats;chips;seated           (lobby listing)
---   R     host -> group   rosterVersion;part;parts;Full Name,Full Name,...   (seats, in chunks)
---   S     host -> group   table state; names are not in it, only the roster version
---   CLOSE host -> group   table closed
---   SIT / LEAVE  player -> group, acted on by the host
---   WHO   anyone -> group, hosts answer with OPEN
--- Messages are capped at 255 bytes. Full "First Last" names for up to 40 seats travel in the
--- roster, sent only when seating changes; the state goes out at most every BATCH seconds.
+-- Message: "2;<tableId>;<seq>;<EVT>;<payload>", at most 255 bytes
+--   OPEN  host -> group    game;wager;maxSeats;chips;seated            (lobby listing)
+--   R     host -> group    rosterVersion;part;parts;Full Name,...        (seats, in chunks)
+--   S     host -> group    part;parts;state chunk                        (state, in chunks)
+--   P     host -> one      private game data (poker hole cards), by whisper
+--   CLOSE host -> group    table closed
+--   SIT / LEAVE / ACT      player -> group, acted on by the host (ACT = action;amount)
+--   WHO   anyone -> group  hosts answer with OPEN
 local _, ns = ...
 local T = { lobby = {} }
 ns.Table = T
 local VERSION = "2"
 local BATCH = .3
-local ROSTER_CHUNK = 200
+local CHUNK = 200
 
 local function split(s, sep)
     local out = {}
@@ -61,11 +60,17 @@ function T.decode(s, host, seats, prev)
     return t
 end
 
+function T.chunks(s, size)
+    local out = {}
+    for i = 1, math.max(1, #s), size do out[#out + 1] = s:sub(i, i + size - 1) end
+    return out
+end
+
 function T.rosterChunks(seats)
     local chunks, cur = {}, {}
     local len = 0
     for _, n in ipairs(seats) do
-        if len + #n + 1 > ROSTER_CHUNK and #cur > 0 then chunks[#chunks + 1] = table.concat(cur, ","); cur, len = {}, 0 end
+        if len + #n + 1 > CHUNK and #cur > 0 then chunks[#chunks + 1] = table.concat(cur, ","); cur, len = {}, 0 end
         cur[#cur + 1] = n
         len = len + #n + 1
     end
@@ -95,7 +100,8 @@ local function sendNow(c)
         ns.send(T.pack(c.tid, 0, "OPEN", table.concat({ t.game, t.wager, t.maxSeats, t.chips and 1 or 0, #t.seats }, ";")))
     end
     c.seq = c.seq + 1
-    ns.send(T.pack(c.tid, c.seq, "S", T.encode(t)))
+    local parts = T.chunks(T.encode(t), CHUNK)
+    for i, p in ipairs(parts) do ns.send(T.pack(c.tid, c.seq, "S", i .. ";" .. #parts .. ";" .. p)) end
 end
 
 local function broadcast(rosterChanged)
@@ -121,16 +127,43 @@ end
 local function checkSettled(c)
     if c.t.phase == "done" and c.settled ~= c.t.round then
         c.settled = c.t.round
+        if game(c.t).verify then
+            c.t.mySeat = seatOf(c.t, ns.me())
+            local ok, what = game(c.t).verify(c.t)
+            if not ok then emit("mismatch", what) end
+        end
         emit("settled", c.t, game(c.t).debts(c.t))
     end
 end
 
--- Deathroll: the host rolls who goes first
-local function hostRolls(c)
-    if c.t.game ~= "deathroll" then return end
-    ns.after(.8, function()
-        if T.cur == c and c.t.phase == "first" then ns.roll(1, #c.t.seats) end
+-- Rolls the host's addon makes on its own (who goes first, coin flips, dealing cards). A roll the
+-- server never answers is retried.
+local function hostAuto(c)
+    local g = game(c.t)
+    if not g.hostRoll then return end
+    local lo, hi = g.hostRoll(c.t)
+    if not lo then return end
+    local key = table.concat({ c.t.round or 0, c.t.phase, c.t.draws or 0, hi }, ":")
+    if c.autoKey == key then return end
+    c.autoKey = key
+    ns.after(.6, function()
+        if T.cur ~= c then return end
+        local lo2, hi2 = g.hostRoll(c.t)
+        if lo2 == lo and hi2 == hi and c.autoKey == key then
+            ns.roll(lo, hi)
+            ns.after(4, function()
+                if T.cur == c and c.autoKey == key then c.autoKey = nil; hostAuto(c) end
+            end)
+        end
     end)
+end
+
+local function hostChanged(c, ev, rosterChanged)
+    if ev then emit("event", ev) end
+    broadcast(rosterChanged)
+    emit("state")
+    checkSettled(c)
+    hostAuto(c)
 end
 
 ---------------------------------------------------------------- host actions
@@ -149,7 +182,7 @@ function T.open(opts)
     emit("state")
 end
 
-function T.addBot(name)   -- /dr test: seats whose rolls Core injects
+function T.addBot(name)   -- /dr test: seats Core plays for
     local c = T.cur
     if not (c and c.hosting and c.t.phase == "seating" and #c.t.seats < c.t.maxSeats) then return end
     c.t.seats[#c.t.seats + 1] = name
@@ -161,20 +194,31 @@ function T.startGame()
     if not (c and c.hosting) then return end
     local t = c.t
     if #t.seats < game(t).minSeats or (t.phase ~= "seating" and t.phase ~= "done") then return end
-    game(t).start(t)
+    game(t).start(t, ns.seed and ns.seed() or tostring(t.round))
     T.seen = {}
-    broadcast(); emit("state")
-    hostRolls(c)
+    if game(t).privateFor then
+        for _, p in ipairs(game(t).privateFor(t)) do
+            local name = t.seats[p.seat]
+            if ns.Rolls.same(name, ns.me()) then game(t).onPrivate(t, p.payload)
+            elseif not (ns.bots and ns.bots[name]) then ns.whisper(name, T.pack(c.tid, 0, "P", p.payload)) end
+        end
+    end
+    hostChanged(c)
 end
 
 -- High-Low: stop waiting for players who have not rolled
 function T.closeRolls()
     local c = T.cur
     if not (c and c.hosting and game(c.t).closeRolls) then return end
-    local ev = game(c.t).closeRolls(c.t)
-    if ev then emit("event", ev) end
-    broadcast(); emit("state")
-    checkSettled(c)
+    hostChanged(c, game(c.t).closeRolls(c.t))
+end
+
+-- the host applies a player's action (or its own, or a bot's)
+function T.hostAct(seat, action, amount)
+    local c = T.cur
+    if not (c and c.hosting and game(c.t).act) then return end
+    local ev = game(c.t).act(c.t, seat, action, amount)
+    if ev then hostChanged(c, ev) end
 end
 
 function T.close()
@@ -198,6 +242,11 @@ end
 
 function T.who() ns.send(T.pack("x", 0, "WHO")) end
 
+function T.mySeat()
+    local c = T.cur
+    return c and seatOf(c.t, ns.me())
+end
+
 function T.myTurn()
     local c = T.cur
     return c ~= nil and game(c.t).rangeFor(c.t, ns.me()) ~= nil
@@ -210,6 +259,20 @@ function T.rollMine()
     if lo then ns.roll(lo, hi) end
 end
 
+-- what I may do right now (card games), or nil
+function T.myActions()
+    local c = T.cur
+    if not c or not game(c.t).actions then return nil end
+    return game(c.t).actions(c.t, T.mySeat())
+end
+
+function T.act(action, amount)
+    local c = T.cur
+    if not c then return end
+    if c.hosting then T.hostAct(T.mySeat(), action, amount)
+    else ns.send(T.pack(c.tid, 0, "ACT", action .. ";" .. (amount or 0))) end
+end
+
 ---------------------------------------------------------------- rolls (everyone)
 
 function T.onRoll(name, value, lo, hi)
@@ -219,20 +282,17 @@ function T.onRoll(name, value, lo, hi)
     if not ev then return end
     T.seen = T.seen or {}
     T.seen[value] = true
-    emit("event", ev)
-    if c.hosting then broadcast() end
-    emit("state")
-    checkSettled(c)
+    if c.hosting then hostChanged(c, ev) else emit("event", ev); emit("state"); checkSettled(c) end
 end
 
 ---------------------------------------------------------------- messages
 
-local function hostIntent(c, evt, sender)
+local function hostIntent(c, evt, sender, payload)
     local t = c.t
     if evt == "SIT" then
         if t.phase == "seating" and #t.seats < t.maxSeats and not seatOf(t, sender) then
             t.seats[#t.seats + 1] = sender
-            broadcast(true); emit("state")
+            hostChanged(c, nil, true)
         else
             c.rosterDirty = true   -- resend the roster so the sender learns where things stand
             broadcast()
@@ -242,22 +302,22 @@ local function hostIntent(c, evt, sender)
         if not seat or seat == 1 then return end
         if t.phase == "seating" or t.phase == "done" then
             table.remove(t.seats, seat)
-            broadcast(true)
-        elseif t.phase == "first" then
+            hostChanged(c, nil, true)
+        elseif t.game == "deathroll" and t.phase == "first" then
             table.remove(t.seats, seat)
-            if #t.seats >= game(t).minSeats then game(t).start(t); hostRolls(c) else t.phase = "seating" end
-            broadcast(true)
+            if #t.seats >= game(t).minSeats then game(t).start(t) else t.phase = "seating" end
+            hostChanged(c, nil, true)
         else
-            local ev = game(t).forfeit(t, seat)
-            if ev then emit("event", ev) end
-            broadcast()
+            hostChanged(c, game(t).forfeit(t, seat))
         end
-        emit("state")
-        checkSettled(c)
+    elseif evt == "ACT" then
+        local seat = seatOf(t, sender)
+        local f = split(payload, ";")
+        if seat then T.hostAct(seat, f[1], tonumber(f[2])) end
     end
 end
 
--- Collect roster chunks; returns the full seat list once every part of a version is in.
+-- Collect roster chunks; true once every part of a version is in.
 local function takeRoster(box, payload)
     local f = split(payload, ";")
     local ver, part, parts = tonumber(f[1]), tonumber(f[2]), tonumber(f[3])
@@ -271,11 +331,25 @@ local function takeRoster(box, payload)
     return true
 end
 
-local function applyState(c, seq, payload, sender)
+-- Collect state chunks of one seq; returns the whole state once complete.
+local function takeState(box, seq, payload)
+    local part, parts, data = payload:match("^(%d+);(%d+);(.*)$")
+    part, parts = tonumber(part), tonumber(parts)
+    if not part then return end
+    if box.stateSeq ~= seq then box.stateSeq, box.stateParts = seq, {} end
+    box.stateParts[part] = data
+    for i = 1, parts do if not box.stateParts[i] then return end end
+    return table.concat(box.stateParts)
+end
+
+local function applyState(c, seq, state, sender)
     local prev = c.t
-    local t = T.decode(payload, sender, c.roster.seats, prev)
+    local t = T.decode(state, sender, c.roster.seats, prev)
     if not t then return end
+    local problem = game(t).check and game(t).check(prev, t)
     c.seq, c.t = seq, t
+    if c.private and game(t).onPrivate then game(t).onPrivate(t, c.private) end
+    if problem then emit("mismatch", problem) end
     if not seatOf(t, ns.me()) then T.cur = nil; emit("leave"); return end
     if prev and prev.round ~= t.round then T.seen = {} end
     -- Deathroll: the host may only report values the server rolled. A state can overtake the
@@ -284,7 +358,7 @@ local function applyState(c, seq, payload, sender)
         local last = t.history[#t.history]
         if last and not (T.seen and T.seen[last]) then
             ns.after(2, function()
-                if T.cur == c and not (T.seen and T.seen[last]) then emit("mismatch", last) end
+                if T.cur == c and not (T.seen and T.seen[last]) then emit("mismatch", "a roll of " .. last .. " that nobody saw") end
             end)
         end
     end
@@ -317,25 +391,28 @@ function T.onMessage(msg, sender)
             if takeRoster(c.roster, payload) and c.pendingS then
                 local p = c.pendingS
                 c.pendingS = nil
-                if p.ver == c.roster.ver then applyState(c, p.seq, p.payload, sender) end
+                if p.ver == c.roster.ver then applyState(c, p.seq, p.state, sender) end
             end
         elseif T.pending and T.pending.tid == tid and T.lobby[tid] and ns.Rolls.same(sender, T.lobby[tid].host) then
             takeRoster(T.pending, payload)
         end
     elseif evt == "S" then
         if mine then return end
-        local ver = tonumber(split(payload, ";")[7])
         if c and c.tid == tid then
             if seq <= c.seq or not ns.Rolls.same(sender, c.host) then return end
+            local state = takeState(c, seq, payload)
+            if not state then return end
+            local ver = tonumber(split(state, ";")[7])
             if not (c.roster and c.roster.ver == ver) then
-                c.pendingS = { seq = seq, payload = payload, ver = ver }   -- wait for that roster
+                c.pendingS = { seq = seq, state = state, ver = ver }   -- wait for that roster
                 return
             end
-            applyState(c, seq, payload, sender)
-        elseif T.pending and T.pending.tid == tid and T.lobby[tid] and ns.Rolls.same(sender, T.lobby[tid].host)
-            and T.pending.ver == ver then
+            applyState(c, seq, state, sender)
+        elseif T.pending and T.pending.tid == tid and T.lobby[tid] and ns.Rolls.same(sender, T.lobby[tid].host) then
+            local state = takeState(T.pending, seq, payload)
+            if not state or T.pending.ver ~= tonumber(split(state, ";")[7]) then return end
             local roster = { ver = T.pending.ver, seats = T.pending.seats }
-            local t = T.decode(payload, sender, roster.seats)
+            local t = T.decode(state, sender, roster.seats)
             if t and seatOf(t, ns.me()) then
                 T.pending = nil
                 T.cur = { tid = tid, host = sender, seq = seq, t = t, hosting = false, settled = t.round, roster = roster }
@@ -343,7 +420,13 @@ function T.onMessage(msg, sender)
                 emit("enter"); emit("state")
             end
         end
+    elseif evt == "P" then
+        if c and c.tid == tid and ns.Rolls.same(sender, c.host) and game(c.t).onPrivate then
+            c.private = payload   -- may arrive before the new hand's state; re-applied with each state
+            game(c.t).onPrivate(c.t, payload)
+            emit("state")
+        end
     elseif c and c.hosting and c.tid == tid and not mine then
-        hostIntent(c, evt, sender)
+        hostIntent(c, evt, sender, payload)
     end
 end

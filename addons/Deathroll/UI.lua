@@ -1,5 +1,5 @@
--- Lobby window (browse tables, open one, waiting room) and the full-screen table view shown in
--- table mode. All chrome is the addon's own art (media/ui, made by scripts/make-ui-art.py).
+-- Lobby window (browse, open a table, waiting room, rules) and the full-screen table view shown in
+-- table mode, with a view for each game. All chrome is the addon's own art (media/ui).
 local _, ns = ...
 local UI = {}
 ns.UI = UI
@@ -22,6 +22,28 @@ local function nm(name) return name and name:match("^[^%-]+") or "?" end
 local function money(t, n) return t.chips and (ns.coins(n) .. " in chips") or ns.coins(n) end
 local function unitNote(t)
     return t.unit == 1 and "1 = 1 copper" or t.unit == 100 and "1 = 1 silver" or "1 = 1 gold"
+end
+
+local TITLES = { deathroll = "DEATHROLL", highlow = "HIGH - LOW", coinflip = "COINFLIP", blackjack = "BLACKJACK", poker = "TEXAS HOLD'EM" }
+
+local RULES = {
+    deathroll = "Players take turns rolling. The first roll is 1 to the start number; every roll after that is 1 to the previous result.\n\nRoll a 1 and you are out. With more than two players the range starts over for the next player.\n\nThe last player standing wins the wager from everyone who went out. The host's addon rolls to decide who goes first.",
+    highlow = "Everyone rolls 1 to the wager at the same time. The roll counts in copper (silver or gold on very big tables; the table says which).\n\nThe lowest roller pays the highest roller the difference.\n\nTies roll again among the tied players only; the original difference still counts. If everyone rolls the same, nobody pays.",
+    coinflip = "Two seats: the first is heads, the second is tails.\n\nThe host's addon flips with /roll 1-2, so the game server decides.\n\nThe loser pays the wager.",
+    blackjack = "The host deals. Up to five players each play their own hand against the dealer.\n\nGoal: finish closer to 21 than the dealer without going over. 2-10 count their number, J Q K count 10, an ace counts 11 or 1.\n\nBlackjack (an ace and a 10-value card as your first two) pays 3 to 2.\n\nHit: take a card.  Stand: keep your total.\nDouble: double your bet on your first two cards and take exactly one more card.\nSplit: two cards of the same value become two hands with a bet each. Split aces get one card each.\n\nThe dealer takes one card first and the rest after every player is done, drawing to 16 and standing on 17. Over 21 is a bust and loses. A dealer blackjack beats every hand except a player blackjack. Equal totals push.\n\nThe shoe is six real decks, 312 cards. Every card the dealer's roll draws leaves the shoe; a new shoe comes in when 78 cards are left.",
+    poker = "Texas Hold'em, no limit. You get two private cards; five shared cards come face up in the middle: the flop (three), the turn (one) and the river (one). Your hand is the best five cards out of your two and the five shared ones.\n\nThe two players after the dealer button post the small and big blind. There is a betting round before the flop, after the flop, after the turn and after the river.\n\nOn your turn: Fold (give up the hand), Check (pass when there is nothing to call), Call (match the bet), Raise (bet more, at least the size of the last raise), or All in.\n\nEveryone starts each hand with 100 big blinds, and every hand settles on its own in the ledger. If everyone else folds you win without showing.\n\nFair deal: the host's addon shuffles from a secret seed and shows its fingerprint before the hand; the seed is revealed after the hand and every addon checks the deal. The host's addon does see the cards during a hand, and the revealed seed shows folded hands afterwards.",
+}
+
+local HAND_EXAMPLES = {
+    { "Royal flush", "As Ks Qs Js 10s" }, { "Straight flush", "9h 8h 7h 6h 5h" }, { "Four of a kind", "Qc Qd Qh Qs 7d" },
+    { "Full house", "Kh Kd Kc 4s 4h" }, { "Flush", "Ad Jd 8d 6d 2d" }, { "Straight", "10c 9d 8h 7s 6c" },
+    { "Three of a kind", "7c 7d 7h Ks 2d" }, { "Two pair", "Jh Jc 5d 5s Ah" }, { "Pair", "9s 9d Ah Jc 4h" },
+    { "High card", "Ac Qd 9h 6s 3c" },
+}
+local function cardFromText(s)
+    local V = { A = 14, K = 13, Q = 12, J = 11 }
+    local r, su = s:match("^(%w-)([hdcs])$")
+    return ns.Cards.make(V[r] or tonumber(r), ({ h = 1, d = 2, c = 3, s = 4 })[su])
 end
 
 -- style: "red" (main action), "gold" (confirm / selected), "dark" (secondary)
@@ -107,13 +129,85 @@ local function onUpdate(_, el)
     end
 end
 
----------------------------------------------------------------- table view
+---------------------------------------------------------------- layout
 
--- seat slots per game: angle around the table, ellipse radii, seat scale
+-- seat positions per game (content coordinates, centre origin), seat scale, and where cards go
+local function ring(angles, rx, ry)
+    local out = {}
+    for i, a in ipairs(angles) do out[i] = { rx * math.cos(math.rad(a)), ry * math.sin(math.rad(a)) - 10 } end
+    return out
+end
 local LAYOUT = {
-    deathroll = { slots = { 180, 0, 140, 40, 220, 320 }, rx = 560, ry = 215, scale = 1 },
-    highlow = { slots = { 180, 0, 148, 32, 212, 328, 118, 62 }, rx = 560, ry = 220, scale = .8 },
+    deathroll = { seats = ring({ 180, 0, 140, 40, 220, 320 }, 560, 215), scale = 1 },
+    highlow = { seats = ring({ 180, 0, 148, 32, 212, 328, 118, 62 }, 560, 220), scale = .8 },
+    coinflip = { seats = { { -480, -10 }, { 480, -10 } }, scale = 1 },
+    blackjack = { scale = .72,
+        seats = { { 0, 220 }, { -545, 30 }, { -395, -170 }, { 0, -205 }, { 395, -170 }, { 545, 30 } },
+        cards = { { 0, 105 }, { -330, 35 }, { -235, -55 }, { 0, -80 }, { 235, -55 }, { 330, 35 } },
+        hostHand = { 215, 160 } },
+    poker = { scale = .72,
+        seats = { { 0, -205 }, { -400, -170 }, { -555, 30 }, { 0, 220 }, { 555, 30 }, { 400, -170 } },
+        cards = { { 0, -88 }, { -250, -72 }, { -360, 30 }, { 125, 205 }, { 360, 30 }, { 250, -72 } } },
 }
+
+---------------------------------------------------------------- cards and labels on the felt
+
+local CARD_W, CARD_H = 56, 80
+local cardTex, labels = {}, {}
+
+local function cardFile(id)
+    return ns.media .. "cards\\" .. (id and ns.Cards.file(id) or "card_back") .. ".png"
+end
+
+local function beginFelt()
+    for _, tx in pairs(cardTex) do tx.used = false end
+    for _, fs in pairs(labels) do fs.used = false end
+end
+local function endFelt()
+    for _, tx in pairs(cardTex) do if not tx.used then tx:Hide() end end
+    for _, fs in pairs(labels) do if not fs.used then fs:Hide() end end
+end
+
+-- A card at x, y. A card that was not on the table before slides in from `origin`.
+local function placeCard(key, id, x, y, origin, scale)
+    local tx = cardTex[key]
+    local fresh = not tx or not tx:IsShown()
+    if not tx then
+        tx = W.cards:CreateTexture(nil, "ARTWORK")
+        tx:SetTexCoord(11 / 64, 53 / 64, 2 / 64, 62 / 64)   -- the card inside Kenney's 64x64 frame
+        cardTex[key] = tx
+    end
+    tx.used = true
+    local file = cardFile(id)
+    if tx.file ~= file then tx:SetTexture(file, nil, nil, "NEAREST"); tx.file = file end
+    tx:SetSize(CARD_W * (scale or 1), CARD_H * (scale or 1))
+    tx:SetDrawLayer("ARTWORK", math.min(7, math.max(-8, math.floor(x / 40))))
+    tx:Show()
+    if fresh and origin then
+        ns.sound(math.random() < .5 and "cardPlace1" or "cardPlace2")
+        tween(.35, function(p)
+            local e = 1 - (1 - p) ^ 2
+            tx:SetPoint("CENTER", W.cards, "CENTER", origin[1] + (x - origin[1]) * e, origin[2] + (y - origin[2]) * e)
+        end)
+    else
+        tx:SetPoint("CENTER", W.cards, "CENTER", x, y)
+    end
+end
+
+local function label(key, text, x, y, size, color)
+    local fs = labels[key]
+    if not fs then
+        fs = font(W.cards, FRIZ, size or 13, "OUTLINE")
+        labels[key] = fs
+    end
+    fs.used = true
+    fs:SetText(text)
+    fs:SetTextColor(unpack(color or { 1, .95, .8 }))
+    fs:SetPoint("CENTER", W.cards, "CENTER", x, y)
+    fs:Show()
+end
+
+---------------------------------------------------------------- table view
 
 local function edge(parent, side, orientation, from, to, size)
     local t = parent:CreateTexture(nil, "BACKGROUND")
@@ -131,12 +225,59 @@ local function layoutSeats(gameId)
     W.layout = gameId
     local lay = LAYOUT[gameId]
     for i, s in ipairs(seats) do
-        local a = lay.slots[i] and math.rad(lay.slots[i])
+        local p = lay.seats[i]
         s:ClearAllPoints()
         s:SetScale(lay.scale)
-        if a then
-            s.ox, s.oy = lay.rx * math.cos(a), lay.ry * math.sin(a) - 10
-            s:SetPoint("CENTER", W.content, "CENTER", s.ox / lay.scale, s.oy / lay.scale)
+        if p then
+            s.ox, s.oy = p[1], p[2]
+            s:SetPoint("CENTER", W.content, "CENTER", p[1] / lay.scale, p[2] / lay.scale)
+        end
+    end
+end
+
+local function sidePanel(title)
+    local p = CreateFrame("Frame", nil, W.content)
+    p:SetSize(340, 470)
+    p:SetPoint("RIGHT", W.content, "RIGHT", -10, -10)
+    p:SetFrameLevel(W.content:GetFrameLevel() + 30)
+    p:EnableMouse(true)
+    local bg = p:CreateTexture(nil, "BACKGROUND")
+    bg:SetTexture(art("parch"))
+    bg:SetAllPoints()
+    p.title = font(p, MORPHEUS, 22, "", INK_RED)
+    p.title:SetPoint("TOP", 0, -14)
+    p.title:SetText(title)
+    local x = skinButton(p, "X", 26, 24, "dark", function() p:Hide() end, 13)
+    x:SetPoint("TOPRIGHT", -10, -10)
+    p:Hide()
+    return p
+end
+
+local function buildPanels()
+    W.rules = sidePanel("Rules")
+    W.rulesText = font(W.rules, FRIZ, 11, "", INK)
+    W.rulesText:SetPoint("TOPLEFT", 20, -48)
+    W.rulesText:SetWidth(300)
+    W.rulesText:SetJustifyH("LEFT")
+    W.rulesText:SetSpacing(2)
+
+    W.hands = sidePanel("Winning Hands")
+    local sub = font(W.hands, FRIZ, 9, "", INK)
+    sub:SetPoint("TOP", 0, -38)
+    sub:SetText("BEST AT THE TOP")
+    for i, ex in ipairs(HAND_EXAMPLES) do
+        local y = -56 - (i - 1) * 40
+        local n = font(W.hands, MORPHEUS, 14, "", INK_RED)
+        n:SetPoint("TOPLEFT", 18, y - 10)
+        n:SetText(i .. ". " .. ex[1])
+        local k = 0
+        for card in ex[2]:gmatch("%S+") do
+            local tx = W.hands:CreateTexture(nil, "ARTWORK")
+            tx:SetTexture(cardFile(cardFromText(card)), nil, nil, "NEAREST")
+            tx:SetTexCoord(11 / 64, 53 / 64, 2 / 64, 62 / 64)
+            tx:SetSize(25, 36)
+            tx:SetPoint("TOPLEFT", 172 + k * 28, y)
+            k = k + 1
         end
     end
 end
@@ -209,43 +350,134 @@ local function buildTable()
     W.hlResult = font(W.hl, MORPHEUS, 22, "OUTLINE", GOLD)
     W.hlResult:SetPoint("CENTER", c, "CENTER", 0, -150)
 
+    -- Coinflip centre
+    W.cf = CreateFrame("Frame", nil, c)
+    W.cf:SetAllPoints()
+    W.coin = W.cf:CreateTexture(nil, "ARTWORK")
+    W.coin:SetTexture("Interface\\Icons\\INV_Misc_Coin_01")
+    W.coin:SetTexCoord(.08, .92, .08, .92)
+    W.coin:SetSize(140, 140)
+    W.coin:SetPoint("CENTER", c, "CENTER", 0, 30)
+    W.cfInfo = font(W.cf, MORPHEUS, 30, "OUTLINE", GOLD)
+    W.cfInfo:SetPoint("CENTER", c, "CENTER", 0, -80)
+    W.heads = font(W.cf, MORPHEUS, 26, "OUTLINE", GOLD)
+    W.heads:SetPoint("CENTER", c, "CENTER", -480, 150)
+    W.heads:SetText("HEADS")
+    W.tails = font(W.cf, MORPHEUS, 26, "OUTLINE", GOLD)
+    W.tails:SetPoint("CENTER", c, "CENTER", 480, 150)
+    W.tails:SetText("TAILS")
+
+    -- card games: cards and labels on the felt, plus the shoe / pot / board text
+    W.cards = CreateFrame("Frame", nil, c)
+    W.cards:SetAllPoints()
+    W.cards:SetFrameLevel(c:GetFrameLevel() + 5)
+    W.cardInfo = font(W.cards, MORPHEUS, 20, "OUTLINE", GOLD)
+    W.cardInfo:SetPoint("CENTER", c, "CENTER", 0, 170)
+    W.shoe = W.cards:CreateTexture(nil, "ARTWORK")
+    W.shoe:SetTexture(cardFile(nil), nil, nil, "NEAREST")
+    W.shoe:SetTexCoord(11 / 64, 53 / 64, 2 / 64, 62 / 64)
+    W.shoe:SetSize(42, 60)
+    W.shoe:SetPoint("CENTER", c, "CENTER", 440, 210)
+    W.shoe:SetRotation(-.25)
+    W.shoeText = font(W.cards, FRIZ, 12, "OUTLINE", { .95, .9, .75 })
+    W.shoeText:SetPoint("TOP", W.shoe, "BOTTOM", 0, -6)
+    W.button = W.cards:CreateTexture(nil, "OVERLAY")
+    W.button:SetTexture(ns.media .. "button.png", nil, nil, "NEAREST")
+    W.button:SetSize(30, 30)
+    W.buttonD = font(W.cards, FRIZ, 12, "OUTLINE", { .1, .1, .1 })
+    W.buttonD:SetText("D")
+    W.buttonD:SetShadowOffset(0, 0)
+    W.buttonD:SetPoint("CENTER", W.button, "CENTER", 0, 1)
+
     for i = 1, 8 do
         local s = ns.Scene.seat(c)
         s:Hide()
         seats[i] = s
     end
 
-    -- bottom bar
+    -- bottom bar: Leave and Start on the left, the game's own controls in the middle
     local bar = CreateFrame("Frame", nil, c)
-    bar:SetSize(860, 70)
+    bar:SetSize(900, 70)
     bar:SetPoint("BOTTOM", 0, 20)
+    bar:SetFrameLevel(c:GetFrameLevel() + 10)
     local bt = bar:CreateTexture(nil, "BACKGROUND")
     bt:SetTexture(art("bar"))
     bt:SetAllPoints()
-    W.leave = skinButton(bar, "Leave table", 118, 32, "dark", function() ns.Table.close() end)
-    W.leave:SetPoint("LEFT", 18, 0)
-    W.start = skinButton(bar, "Start", 110, 32, "gold", function() ns.Table.startGame() end)
+    W.leave = skinButton(bar, "Leave table", 112, 32, "dark", function() ns.Table.close() end)
+    W.leave:SetPoint("LEFT", 16, 0)
+    W.start = skinButton(bar, "Start", 104, 32, "gold", function() ns.Table.startGame() end)
     W.start:SetPoint("LEFT", W.leave, "RIGHT", 8, 0)
-    W.closeRolls = skinButton(bar, "Close rolls", 110, 32, "dark", function() ns.Table.closeRolls() end)
+    W.closeRolls = skinButton(bar, "Close rolls", 104, 32, "dark", function() ns.Table.closeRolls() end)
     W.closeRolls:SetPoint("LEFT", W.leave, "RIGHT", 8, 0)
+
     W.roll = skinButton(bar, "ROLL", 200, 50, "red", function() ns.Table.rollMine() end, 28)
-    W.roll:SetPoint("CENTER")
-    W.music = skinButton(bar, "Music: on", 110, 32, "dark", function()
+    W.roll:SetPoint("CENTER", 60, 0)
+
+    W.bjBar = CreateFrame("Frame", nil, bar)
+    W.bjBar:SetSize(440, 50)
+    W.bjBar:SetPoint("CENTER", 110, 0)
+    W.bjButtons = {}
+    for i, a in ipairs({ { "hit", "HIT", "red" }, { "stand", "STAND", "red" }, { "double", "DOUBLE", "gold" }, { "split", "SPLIT", "gold" } }) do
+        local b = skinButton(W.bjBar, a[2], 100, 40, a[3], function() ns.Table.act(a[1]) end, 18)
+        b:SetPoint("LEFT", (i - 1) * 108, 0)
+        W.bjButtons[a[1]] = b
+    end
+
+    W.pkBar = CreateFrame("Frame", nil, bar)
+    W.pkBar:SetSize(640, 50)
+    W.pkBar:SetPoint("CENTER", 120, 0)
+    W.pkFold = skinButton(W.pkBar, "FOLD", 78, 38, "dark", function() ns.Table.act("fold") end, 16)
+    W.pkFold:SetPoint("LEFT", 0, 0)
+    W.pkCall = skinButton(W.pkBar, "CHECK", 150, 38, "red", function()
+        local can = ns.Table.myActions()
+        if can then ns.Table.act(can.check and "check" or "call") end
+    end, 15)
+    W.pkCall:SetPoint("LEFT", W.pkFold, "RIGHT", 6, 0)
+    W.pkMinus = skinButton(W.pkBar, "-", 26, 26, "dark", function() UI.stepRaise(-1) end, 16)
+    W.pkMinus:SetPoint("LEFT", W.pkCall, "RIGHT", 10, 0)
+    W.pkAmount = font(W.pkBar, FRIZ, 12, "OUTLINE", { 1, .95, .8 })
+    W.pkAmount:SetPoint("LEFT", W.pkMinus, "RIGHT", 4, 0)
+    W.pkAmount:SetWidth(108)
+    W.pkPlus = skinButton(W.pkBar, "+", 26, 26, "dark", function() UI.stepRaise(1) end, 16)
+    W.pkPlus:SetPoint("LEFT", W.pkMinus, "RIGHT", 116, 0)
+    W.pkPot = skinButton(W.pkBar, "POT", 50, 26, "dark", function() UI.potRaise() end, 12)
+    W.pkPot:SetPoint("LEFT", W.pkPlus, "RIGHT", 4, 0)
+    W.pkRaise = skinButton(W.pkBar, "RAISE", 82, 38, "gold", function() ns.Table.act("raise", W.raiseTo) end, 16)
+    W.pkRaise:SetPoint("LEFT", W.pkPot, "RIGHT", 8, 0)
+    W.pkAllin = skinButton(W.pkBar, "ALL IN", 76, 38, "red", function() ns.Table.act("allin") end, 14)
+    W.pkAllin:SetPoint("LEFT", W.pkRaise, "RIGHT", 6, 0)
+
+    -- top-right corner: hide, music, rules, hand rankings
+    local corner = CreateFrame("Frame", nil, c)
+    corner:SetSize(420, 26)
+    corner:SetPoint("TOPRIGHT", c, "TOPRIGHT", -16, -16)
+    corner:SetFrameLevel(c:GetFrameLevel() + 10)
+    W.hide = skinButton(corner, "Hide (Esc)", 96, 24, "dark", function() ns.Stage.leave("hide") end, 12)
+    W.hide:SetPoint("RIGHT")
+    W.music = skinButton(corner, "Music: on", 96, 24, "dark", function()
         W.music:SetLabel(ns.Stage.toggleMusic() and "Music: off" or "Music: on")
-    end)
-    W.music:SetPoint("RIGHT", -18, 0)
-    W.hide = skinButton(bar, "Hide (Esc)", 110, 32, "dark", function() ns.Stage.leave("hide") end)
-    W.hide:SetPoint("RIGHT", W.music, "LEFT", -8, 0)
+    end, 12)
+    W.music:SetPoint("RIGHT", W.hide, "LEFT", -6, 0)
+    W.rulesBtn = skinButton(corner, "Rules", 80, 24, "dark", function()
+        W.hands:Hide(); W.rules:SetShown(not W.rules:IsShown())
+    end, 12)
+    W.rulesBtn:SetPoint("RIGHT", W.music, "LEFT", -6, 0)
+    W.handsBtn = skinButton(corner, "Hands", 80, 24, "gold", function()
+        W.rules:Hide(); W.hands:SetShown(not W.hands:IsShown())
+    end, 12)
+    W.handsBtn:SetPoint("RIGHT", W.rulesBtn, "LEFT", -6, 0)
 
     W.status = font(c, FRIZ, 15, "OUTLINE", { .95, .9, .75 })
     W.status:SetPoint("BOTTOM", bar, "TOP", 0, 10)
     W.banner = font(c, FRIZ, 16, "OUTLINE", { 1, .35, .25 })
     W.banner:SetPoint("TOP", W.sub, "BOTTOM", 0, -10)
 
+    buildPanels()
+
     -- dice, stinger and coins sit above everything
     W.fx = CreateFrame("Frame", nil, c)
     W.fx:SetAllPoints()
-    W.fx:SetFrameLevel(c:GetFrameLevel() + 20)
+    W.fx:SetFrameLevel(c:GetFrameLevel() + 25)
     W.dice = W.fx:CreateTexture(nil, "OVERLAY")
     W.dice:SetSize(56, 56)
     W.dice:Hide()
@@ -313,16 +545,33 @@ local function throwDice(seatIndex, final, max, onLand, tx, ty)
     end)
 end
 
+---------------------------------------------------------------- per-game refresh
+
+local function waitingNote(c, t)
+    return c.hosting and (#t.seats >= ns.Games[t.game].minSeats and "Press Start when everyone is seated." or "")
+        or "Waiting for the host to start."
+end
+
 local function seatState(t, i)
     if t.game == "deathroll" then
         if t.phase == "done" and t.winner == i then return "win" end
         if t.alive and t.alive[i] == false then return "out" end
         if t.phase == "rolling" and t.turn == i then return "turn" end
-    else
+    elseif t.game == "highlow" then
         if t.phase == "done" and t.hiSeat == i and (t.diff or 0) > 0 then return "win" end
         if t.phase == "done" and t.loSeat == i and (t.diff or 0) > 0 then return "out" end
-        local waiting = ns.Games.highlow.waitingOn(t)
-        for _, s in ipairs(waiting) do if s == i then return "turn" end end
+        for _, s in ipairs(ns.Games.highlow.waitingOn(t)) do if s == i then return "turn" end end
+    elseif t.game == "coinflip" then
+        if t.phase == "done" then return t.winner == i and "win" or "out" end
+    elseif t.game == "blackjack" then
+        if t.phase == "done" and i >= ns.Games.blackjack.first(t) and t.results then
+            return (t.results[i] or 0) > 0 and "win" or (t.results[i] or 0) < 0 and "out" or nil
+        end
+        if t.turn and t.turn[1] == i then return "turn" end
+    elseif t.game == "poker" then
+        if t.phase == "done" and t.won and (t.won[i] or 0) > 0 then return "win" end
+        if t.inHand and t.phase ~= "seating" and not t.inHand[i] then return "out" end
+        if t.toAct == i then return "turn" end
     end
 end
 
@@ -337,7 +586,7 @@ local function refreshDeathroll(c, t, mine)
         W.num:SetText(t.start)
         W.turn:SetText("")
         W.range:SetText(("Waiting for players  %d / %d"):format(n, t.maxSeats))
-        W.status:SetText(c.hosting and (n >= 2 and "Press Start when everyone is seated." or "") or "Waiting for the host to start.")
+        W.status:SetText(waitingNote(c, t))
     elseif t.phase == "first" then
         if not W.spinning then W.num:SetText(t.start) end
         W.turn:SetText("WHO GOES FIRST?")
@@ -383,7 +632,7 @@ local function refreshHighLow(c, t, mine)
     W.hlResult:SetText("")
     if t.phase == "seating" then
         W.hlInfo:SetText(("Waiting for players  %d / %d"):format(#t.seats, t.maxSeats))
-        W.status:SetText(c.hosting and (#t.seats >= 2 and "Press Start when everyone is seated." or "") or "Waiting for the host to start.")
+        W.status:SetText(waitingNote(c, t))
     elseif t.phase == "rolling" then
         W.hlInfo:SetText(("Everyone rolls 1 - %d"):format(t.range))
         W.status:SetText(mine and "Click ROLL." or "Waiting for everyone to roll.")
@@ -426,40 +675,241 @@ local function refreshHighLow(c, t, mine)
     end
 end
 
+local function refreshCoinflip(c, t)
+    W.sub:SetText(("Wager %s  -  %s is heads, %s is tails"):format(money(t, t.wager), nm(t.seats[1]), nm(t.seats[2] or "?")))
+    if t.phase == "seating" then
+        W.cfInfo:SetText(("Waiting for players  %d / 2"):format(#t.seats))
+        W.status:SetText(waitingNote(c, t))
+    elseif t.phase == "flip" then
+        if not W.flipping then W.cfInfo:SetText("Flipping...") end
+        W.status:SetText("")
+    elseif t.phase == "done" and not W.flipping then
+        W.cfInfo:SetText(((t.winner == 1) and "HEADS" or "TAILS") .. "  -  " .. nm(t.seats[t.winner]) .. " wins")
+    end
+end
+
+local function handLabel(hand, outcome, t)
+    local total = ns.Games.blackjack.total(hand.cards)
+    local text = ns.Games.blackjack.isBJ(hand) and "Blackjack" or total > 21 and "Bust" or tostring(total)
+    if hand.doubled then text = text .. "  x2" end
+    if outcome then
+        text = text .. (outcome > 0 and ("  |cff40ff40+" .. ns.coins(outcome) .. "|r") or outcome < 0 and ("  |cffff6050-" .. ns.coins(-outcome) .. "|r") or "  push")
+    end
+    return text
+end
+
+local function refreshBlackjack(c, t)
+    local lay = LAYOUT.blackjack
+    W.sub:SetText(("Bet %s per hand  -  blackjack pays 3 to 2  -  dealer stands on 17"):format(money(t, t.wager)))
+    local shoe = t.shoe
+    W.shoeText:SetText(shoe and ("Shoe  %d / %d"):format(shoe.left, shoe.decks * 52) or "")
+    local origin = { 440, 210 }
+    beginFelt()
+    if t.phase ~= "seating" and t.dealer then
+        local d = t.dealer.cards
+        local dx, dy = lay.cards[1][1], lay.cards[1][2]
+        for i, card in ipairs(d) do placeCard("d" .. i, card, dx + (i - 1) * 30 - 15, dy, origin) end
+        if #d == 1 and (t.phase == "dealing" or t.phase == "playing") then placeCard("d2", nil, dx + 15, dy) end
+        if #d > 0 then label("dt", "Dealer  " .. handLabel(t.dealer), dx, dy + 56, 14) end
+        for s = ns.Games.blackjack.first(t), #t.seats do
+            local hands = t.hands and t.hands[s] or {}
+            local spot = s == 1 and lay.hostHand or lay.cards[s]   -- practice: the host plays from the top
+            local ax, ay = spot[1], spot[2]
+            for h, hand in ipairs(hands) do
+                local hx = ax + (h - (#hands + 1) / 2) * 92
+                for i, card in ipairs(hand.cards) do
+                    placeCard(("p%d.%d.%d"):format(s, h, i), card, hx + (i - 1) * 16 - 8, ay - (i - 1) * 6, origin, .85)
+                end
+                if #hand.cards > 0 then
+                    local active = t.turn and t.turn[1] == s and t.turn[2] == h
+                    label(("pt%d.%d"):format(s, h), handLabel(hand, t.outcome and t.outcome[s] and t.outcome[s][h], t),
+                        hx, ay + 52, 12, active and GOLD or nil)
+                end
+            end
+        end
+    end
+    endFelt()
+    if t.phase == "seating" then
+        W.cardInfo:SetText(("Waiting for players  %d / %d"):format(#t.seats - 1, t.maxSeats - 1))
+        W.status:SetText(waitingNote(c, t))
+    elseif t.phase == "dealing" then
+        W.cardInfo:SetText(t.reshuffled and "New shoe. Dealing..." or "Dealing...")
+        W.status:SetText("")
+    elseif t.phase == "playing" then
+        local who = t.turn and t.seats[t.turn[1]]
+        W.cardInfo:SetText(who and (ns.Rolls.same(who, ns.me()) and "YOUR HAND" or (nm(who):upper() .. "'S HAND")) or "")
+        W.status:SetText(ns.Table.myActions() and "Hit, stand, double or split." or "")
+    elseif t.phase == "dealer" then
+        W.cardInfo:SetText("Dealer draws")
+        W.status:SetText("")
+    elseif t.phase == "done" then
+        W.cardInfo:SetText("Hand over")
+    end
+end
+
+local function refreshPoker(c, t)
+    local lay = LAYOUT.poker
+    W.sub:SetText(("Blinds %s / %s  -  everyone starts each hand with %s"):format(ns.coins(t.sb), ns.coins(t.bb), ns.coins(t.cap)))
+    local mySeat = ns.Table.mySeat()
+    local origin = { 0, 150 }
+    beginFelt()
+    if t.phase ~= "seating" and t.inHand then
+        for i = 1, 5 do
+            if t.board and t.board[i] then placeCard("b" .. i, t.board[i], (i - 3) * 64, 15, origin) end
+        end
+        local pot = 0
+        for s = 1, #t.seats do pot = pot + (t.total and t.total[s] or 0) end
+        label("pot", "Pot  " .. ns.coins(pot), 0, 82, 15, GOLD)
+        for s = 1, #t.seats do
+            local ax, ay = lay.cards[s][1], lay.cards[s][2]
+            local hole
+            if s == mySeat then hole = t.myHole or (t.inHand[s] and { false, false })
+            elseif t.shown and t.shown[s] then hole = t.shown[s]
+            elseif t.inHand[s] and t.phase ~= "done" then hole = { false, false } end
+            if hole then
+                for k = 1, 2 do placeCard(("h%d.%d"):format(s, k), hole[k] or nil, ax + (k - 1.5) * 34, ay, origin, .8) end
+            end
+            local left = t.cap - (t.total[s] or 0)
+            local note = t.inHand[s] and (t.allin[s] and "ALL IN" or ("stack " .. ns.coins(left))) or "folded"
+            local bet = (t.bet[s] or 0) > 0 and ("bet " .. ns.coins(t.bet[s])) or ""
+            label(("n%d"):format(s), note, ax, ay - 46, 11)
+            if bet ~= "" then label(("bt%d"):format(s), bet, ax, ay + 44, 12, GOLD) end
+            if t.phase == "done" and t.won and (t.won[s] or 0) > 0 then
+                local hn = t.scores and t.scores[s] and ns.Cards.handName(t.scores[s]) or ""
+                label(("w%d"):format(s), ("wins %s  %s"):format(ns.coins(t.won[s]), hn), ax, ay + 44, 13, GOLD)
+            elseif t.phase == "done" and t.scores and t.scores[s] then
+                label(("w%d"):format(s), ns.Cards.handName(t.scores[s]), ax, ay + 44, 12)
+            end
+        end
+        -- dealer button next to the button seat's cards
+        local b = lay.cards[t.button] or lay.cards[1]
+        W.button:SetPoint("CENTER", W.cards, "CENTER", b[1] + 62, b[2] + 10)
+        W.button:Show(); W.buttonD:Show()
+    else
+        W.button:Hide(); W.buttonD:Hide()
+    end
+    endFelt()
+    local streetName = { preflop = "PRE-FLOP", flop = "FLOP", turn = "TURN", river = "RIVER", showdown = "SHOWDOWN" }
+    if t.phase == "seating" then
+        W.cardInfo:SetText(("Waiting for players  %d / %d"):format(#t.seats, t.maxSeats))
+        W.status:SetText(waitingNote(c, t))
+    elseif t.phase == "betting" then
+        W.cardInfo:SetText(streetName[t.street] or "")
+        local who = t.toAct and t.seats[t.toAct]
+        W.status:SetText(who and (ns.Rolls.same(who, ns.me()) and "Your turn." or (nm(who) .. " to act.")) or "")
+    elseif t.phase == "done" then
+        W.cardInfo:SetText(t.street == "showdown" and "SHOWDOWN" or "HAND OVER")
+    end
+end
+
+-- poker raise amount controls
+function UI.stepRaise(dir)
+    local c = ns.Table.current()
+    local can = ns.Table.myActions()
+    if not (c and can and can.raise) then return end
+    W.raiseTo = math.max(can.minTo, math.min(can.maxTo, (W.raiseTo or can.minTo) + dir * c.t.bb))
+    W.pkAmount:SetText("to " .. ns.coins(W.raiseTo))
+end
+function UI.potRaise()
+    local c = ns.Table.current()
+    local can = ns.Table.myActions()
+    if not (c and can and can.raise) then return end
+    local pot = 0
+    for s = 1, #c.t.seats do pot = pot + (c.t.total[s] or 0) end
+    W.raiseTo = math.max(can.minTo, math.min(can.maxTo, c.t.curBet + pot + can.toCall))
+    W.pkAmount:SetText("to " .. ns.coins(W.raiseTo))
+end
+
+local function refreshControls(c, t, mine)
+    local g = t.game
+    local between = t.phase == "seating" or t.phase == "done"
+    local cards = g == "blackjack" or g == "poker"
+    W.start:SetShown(c.hosting and between)
+    W.start:SetLabel(cards and (t.phase == "done" and "Next hand" or "Deal") or (t.phase == "done" and "Rematch" or "Start"))
+    W.start:SetEnabled(#t.seats >= ns.Games[g].minSeats)
+    W.closeRolls:SetShown(c.hosting and g == "highlow" and (t.phase == "rolling" or t.phase == "tie"))
+    W.roll:SetShown(g == "deathroll" or g == "highlow")
+    W.roll:SetEnabled(mine and not ns.lockdown())
+    W.bjBar:SetShown(g == "blackjack")
+    W.pkBar:SetShown(g == "poker")
+    W.handsBtn:SetShown(g == "poker")
+    if not W.hands:IsShown() or g ~= "poker" then W.hands:SetShown(W.hands:IsShown() and g == "poker") end
+    local can = cards and ns.Table.myActions()
+    if g == "blackjack" then
+        for a, b in pairs(W.bjButtons) do b:SetEnabled(can and can[a] and not ns.lockdown() or false) end
+    elseif g == "poker" then
+        local on = can and not ns.lockdown()
+        W.pkFold:SetEnabled(on or false)
+        W.pkCall:SetEnabled(on or false)
+        W.pkCall:SetLabel(can and (can.check and "CHECK" or ("CALL " .. ns.coins(can.call or 0))) or "CHECK")
+        for _, b in ipairs({ W.pkMinus, W.pkPlus, W.pkPot, W.pkRaise, W.pkAllin }) do b:SetEnabled(on and can.raise or false) end
+        local key = can and table.concat({ t.round, t.street, t.curBet, t.toAct }, ":")
+        if key ~= W.raiseKey then
+            W.raiseKey = key
+            W.raiseTo = can and can.minTo or nil
+        end
+        W.pkAmount:SetText(W.raiseTo and ("to " .. ns.coins(W.raiseTo)) or "")
+    end
+    W.music:SetLabel(DeathrollDB.settings.mute and "Music: off" or "Music: on")
+end
+
 local function refresh()
     local c = ns.Table.current()
     if not view or not c then return end
     local t = c.t
+    local g = t.game
     local mine = ns.Table.myTurn()
-    local hl = t.game == "highlow"
-    layoutSeats(t.game)
-    W.title:SetText(hl and "HIGH - LOW" or "DEATHROLL")
-    W.dr:SetShown(not hl)
-    W.hl:SetShown(hl)
-    if hl then W.danger = false; W.glow:Hide() end
+    layoutSeats(g)
+    W.title:SetText(TITLES[g])
+    W.dr:SetShown(g == "deathroll")
+    W.hl:SetShown(g == "highlow")
+    W.cf:SetShown(g == "coinflip")
+    W.cards:SetShown(g == "blackjack" or g == "poker")
+    W.shoe:SetShown(g == "blackjack"); W.shoeText:SetShown(g == "blackjack")
+    if g ~= "deathroll" then W.danger = false; W.glow:Hide() end
+    W.rulesText:SetText(RULES[g])
 
     for i, s in ipairs(seats) do
         local name = t.seats[i]
-        if name and LAYOUT[t.game].slots[i] then
+        if name and LAYOUT[g].seats[i] then
             s:Show()
             s:SetPlayer(name)
             local state = seatState(t, i)
             if s.state ~= state then s:SetState(state) end
-            s:SetNote(i == 1 and "host" or "")
+            s:SetNote(i == 1 and (g == "blackjack" and "dealer" or "host") or "")
         else
             s:Hide()
         end
     end
 
-    if hl then refreshHighLow(c, t, mine) else refreshDeathroll(c, t, mine) end
+    if g == "deathroll" then refreshDeathroll(c, t, mine)
+    elseif g == "highlow" then refreshHighLow(c, t, mine)
+    elseif g == "coinflip" then refreshCoinflip(c, t)
+    elseif g == "blackjack" then refreshBlackjack(c, t)
+    elseif g == "poker" then refreshPoker(c, t) end
+    refreshControls(c, t, mine)
+end
 
-    W.roll:SetEnabled(mine and not ns.lockdown())
-    local between = t.phase == "seating" or t.phase == "done"
-    W.start:SetShown(c.hosting and between)
-    W.start:SetLabel(t.phase == "done" and "Rematch" or "Start")
-    W.start:SetEnabled(#t.seats >= ns.Games[t.game].minSeats)
-    W.closeRolls:SetShown(c.hosting and hl and (t.phase == "rolling" or t.phase == "tie"))
-    W.music:SetLabel(DeathrollDB.settings.mute and "Music: off" or "Music: on")
+---------------------------------------------------------------- per-game moments
+
+local function flipCoin(ev, t)
+    W.flipping = true
+    ns.sound("chipLay1")
+    W.cfInfo:SetText("")
+    tween(1.5, function(p)
+        W.coin:SetWidth(math.max(2, 140 * math.abs(math.cos(p * math.pi * 7))))
+        W.coin:SetPoint("CENTER", W.content, "CENTER", 0, 30 + math.sin(p * math.pi) * 140)
+    end, function()
+        W.flipping = false
+        W.coin:SetWidth(140)
+        ns.sound("chipsStack2")
+        local side = ev.winner == 1 and "HEADS" or "TAILS"
+        W.cfInfo:SetText(side .. "  -  " .. nm(t.seats[ev.winner]) .. " wins")
+        stinger(side, nm(t.seats[ev.winner]) .. " wins " .. money(t, t.wager), 1.6, GOLD)
+        local w, l = seats[ev.winner], seats[3 - ev.winner]
+        if w then w:Anim("cheer", 4); C_Timer.After(1, function() coinShower(w.ox, w.oy + 60, 50) end) end
+        if l then l:Anim("cry", 4) end
+    end)
 end
 
 local function onEvent(ev)
@@ -471,6 +921,28 @@ local function onEvent(ev)
             ns.sound("diceThrow1")
             if seats[ev.seat] and seats[ev.seat]:IsShown() then seats[ev.seat]:Anim("talk", 1.2) end
             throwDice(ev.seat, nil, nil, nil, 0, -40)
+        end
+        return
+    elseif t.game == "coinflip" then
+        if ev.kind == "flip" then flipCoin(ev, t) end
+        return
+    elseif t.game == "blackjack" then
+        if ev.kind == "act" and seats[ev.seat] then seats[ev.seat]:Anim("talk", 1.2) end
+        if ev.done and t.results then
+            local best, worst = 0, 0
+            for s = ns.Games.blackjack.first(t), #t.seats do
+                local r = t.results[s] or 0
+                if seats[s] then seats[s]:Anim(r > 0 and "cheer" or r < 0 and "cry" or "idle", 3) end
+                best, worst = math.max(best, r), math.min(worst, r)
+            end
+            local dt = ns.Games.blackjack.total(t.dealer.cards)
+            stinger(dt > 21 and "DEALER BUSTS" or ("DEALER " .. dt), nil, 1.2, GOLD)
+        end
+        return
+    elseif t.game == "poker" then
+        if ev.kind == "act" then
+            if seats[ev.seat] then seats[ev.seat]:Anim(ev.action == "fold" and "cry" or "talk", 1.2) end
+            ns.sound(ev.action == "fold" and "cardSlide2" or "chipLay1")
         end
         return
     end
@@ -505,6 +977,16 @@ local function onEvent(ev)
 end
 
 local function showSettled(t, debts)
+    if t.game == "poker" and t.phase == "done" and t.winners and #t.winners > 0 then
+        local names = {}
+        for _, s in ipairs(t.winners) do names[#names + 1] = nm(t.seats[s]) end
+        local s1 = t.winners[1]
+        local hn = t.scores and t.scores[s1] and ns.Cards.handName(t.scores[s1]) or "everyone else folded"
+        stinger(#names > 1 and "SPLIT POT" or (names[1]:upper() .. " WINS"), hn, 1.6, GOLD)
+        local w = seats[s1]
+        if w then w:Anim("cheer", 4); coinShower(w.ox, w.oy + 60, 40) end
+        ns.sound("chipsStack1")
+    end
     if #debts == 0 then return end
     local parts = {}
     for _, d in ipairs(debts) do parts[#parts + 1] = ("%s pays %s %s"):format(nm(d.from), nm(d.to), money(t, d.amount)) end
@@ -532,6 +1014,14 @@ local function classColor(name)
     return c and c.r or INK[1], c and c.g or INK[2], c and c.b or INK[3]
 end
 
+local function tableLine(t)
+    if t.game == "deathroll" then return ("Start number  %d"):format(t.start) end
+    if t.game == "highlow" then return ("Rolls 1 - %d  (%s)"):format(t.range, unitNote(t)) end
+    if t.game == "coinflip" then return "Seat 1 heads, seat 2 tails" end
+    if t.game == "blackjack" then return "Six-deck shoe, dealer is seat 1" end
+    if t.game == "poker" then return ("Blinds %s / %s"):format(ns.coins(t.sb), ns.coins(t.bb)) end
+end
+
 -- Waiting room: the seats of the table I host or sit at, shown in the lobby window while the
 -- normal UI and chat stay up. The host's Start pulls everyone into the table view.
 local function refreshRoom(cur)
@@ -546,7 +1036,8 @@ local function refreshRoom(cur)
             row.num:SetText(i)
             if name then
                 row.name:SetText(nm(name)); row.name:SetTextColor(classColor(name))
-                row.tag:SetText(i == 1 and "host" or (ns.bots[name] and "practice bot") or (ns.Rolls.same(name, ns.me()) and "you") or "")
+                row.tag:SetText(i == 1 and (t.game == "blackjack" and "dealer" or "host") or (ns.bots[name] and "practice bot")
+                    or (ns.Rolls.same(name, ns.me()) and "you") or "")
             else
                 row.name:SetText("open seat"); row.name:SetTextColor(.5, .42, .3)
                 row.tag:SetText("")
@@ -564,9 +1055,9 @@ local function refreshRoom(cur)
         end
     end
     local n = #t.seats
-    local line2 = t.game == "deathroll" and ("Start number  %d"):format(t.start)
-        or ("Rolls 1 - %d  (%s)"):format(t.range, unitNote(t))
-    L.roomInfo:SetText(("Wager  %s%s\n%s\nSeats  %d / %d"):format(ns.coins(t.wager), t.chips and "  (chips)" or "", line2, n, t.maxSeats))
+    local wagerName = t.game == "poker" and "Big blind" or t.game == "blackjack" and "Bet per hand" or "Wager"
+    L.roomInfo:SetText(("%s  %s%s\n%s\nSeats  %d / %d"):format(wagerName, ns.coins(t.wager), t.chips and "  (chips)" or "",
+        tableLine(t), n, t.maxSeats))
     if t.phase == "seating" then
         if cur.hosting then
             L.roomStatus:SetText(n >= g.minSeats and "Everyone in? Start the game." or "Waiting for players to take a seat.")
@@ -589,6 +1080,7 @@ local function refreshLobby()
     local cur = ns.Table.current()
     for _, p in ipairs(L.browse) do p:SetShown(not cur) end
     for _, p in ipairs(L.room) do p:SetShown(cur ~= nil) end
+    L.rulesBox:SetShown(L.rulesBox.on and not cur)
     L.ledger:SetText(ledgerText())
     if cur then refreshRoom(cur); return end
     local list = {}
@@ -618,7 +1110,7 @@ local function field(parent, label, value, x, y, w)
     fs:SetPoint("TOPLEFT", x, y)
     fs:SetText(label)
     local e = CreateFrame("EditBox", nil, parent)
-    e:SetSize(w, 28)
+    e:SetSize(w, 26)
     e:SetPoint("TOPLEFT", fs, "BOTTOMLEFT", 0, -3)
     local bg = e:CreateTexture(nil, "BACKGROUND")
     bg:SetTexture(art("inset"))
@@ -637,7 +1129,7 @@ end
 
 -- a pill that flips between dark (off) and gold (on)
 local function toggle(parent, label, w, onChange)
-    local b = skinButton(parent, label, w, 26, "dark", nil, 13)
+    local b = skinButton(parent, label, w, 26, "dark", nil, 12)
     function b:SetOn(on)
         self.on = on and true or false
         self:SetStyle(self.on and "gold" or "dark")
@@ -648,13 +1140,26 @@ local function toggle(parent, label, w, onChange)
     return b
 end
 
+local GAME_FIELDS = {
+    deathroll = { wager = "WAGER", seats = "SEATS (2-6)", seatsDefault = "2", start = true },
+    highlow = { wager = "WAGER = HIGHEST ROLL", seats = "SEATS (2-40)", seatsDefault = "10" },
+    coinflip = { wager = "WAGER", seats = nil },
+    blackjack = { wager = "BET PER HAND", seats = "SEATS (DEALER + 1-5)", seatsDefault = "6" },
+    poker = { wager = "BIG BLIND", seats = "SEATS (2-6)", seatsDefault = "6" },
+}
+local PRACTICE = { deathroll = "test 1 deathroll", highlow = "test 9 highlow", coinflip = "test 1 coinflip",
+    blackjack = "test 3 blackjack", poker = "test 3 poker" }
+
 local function selectGame(id)
     L.game = id
     for gid, b in pairs(L.gameButtons) do b:SetStyle(gid == id and "gold" or "dark") end
-    local dr = id == "deathroll"
-    L.start:SetShown(dr); L.start.label:SetShown(dr)
-    L.seats.label:SetText(dr and "SEATS (2-6)" or "SEATS (2-40)")
-    L.seats:SetText(dr and "2" or "10")
+    local f = GAME_FIELDS[id]
+    L.gold.label:SetText(f.wager)
+    L.start:SetShown(f.start or false); L.start.label:SetShown(f.start or false)
+    L.seats:SetShown(f.seats ~= nil); L.seats.label:SetShown(f.seats ~= nil)
+    if f.seats then L.seats.label:SetText(f.seats); L.seats:SetText(f.seatsDefault) end
+    L.rulesTitle:SetText(ns.Games[id].name)
+    L.rulesText:SetText(RULES[id])
 end
 
 local function buildLobby()
@@ -723,36 +1228,45 @@ local function buildLobby()
     L.empty:SetWidth(330)
     L.empty:SetText("No open tables yet.\n\nOpen one on the right, or ask the host to invite you to their group.")
     local practice = skinButton(left, "Practice vs bots", 150, 28, "dark", function()
-        SlashCmdList.DEATHROLL(L.game == "highlow" and "test 9 highlow" or "test 1 deathroll")
+        SlashCmdList.DEATHROLL(PRACTICE[L.game])
     end, 13)
     practice:SetPoint("BOTTOMLEFT", 16, 14)
     local refreshBtn = skinButton(left, "Refresh", 100, 28, "dark", function() ns.Table.who(); refreshLobby() end, 13)
     refreshBtn:SetPoint("BOTTOMRIGHT", -16, 14)
 
+    -- rules for the selected game, over the open-tables panel
+    L.rulesBox = panel(30, -52, 417, 350)
+    L.rulesBox:SetFrameLevel(left:GetFrameLevel() + 5)
+    L.rulesTitle = font(L.rulesBox, MORPHEUS, 22, "", INK_RED)
+    L.rulesTitle:SetPoint("TOP", 0, -12)
+    L.rulesText = font(L.rulesBox, FRIZ, 11, "", INK)
+    L.rulesText:SetPoint("TOPLEFT", 22, -44)
+    L.rulesText:SetWidth(375)
+    L.rulesText:SetJustifyH("LEFT")
+    local rclose = skinButton(L.rulesBox, "Close", 80, 24, "dark", function() L.rulesBox.on = false; refreshLobby() end, 12)
+    rclose:SetPoint("BOTTOMRIGHT", -14, 12)
+
     -- browse, right: open a table
     local right = panel(474, -52, 264, 350)
     local h2 = font(right, MORPHEUS, 22, "", INK_RED)
-    h2:SetPoint("TOP", 0, -12)
+    h2:SetPoint("TOP", 0, -10)
     h2:SetText("Open a Table")
     L.gameButtons = {}
-    local games = { { "deathroll", "Deathroll" }, { "highlow", "High-Low" }, { nil, "Coinflip" }, { nil, "Blackjack" } }
+    local games = { { "deathroll", "Deathroll" }, { "highlow", "High-Low" }, { "coinflip", "Coinflip" },
+        { "blackjack", "Blackjack" }, { "poker", "Hold'em" } }
     for i, g in ipairs(games) do
-        local b = skinButton(right, g[2], 112, 28, "dark", nil, 13)
-        b:SetPoint("TOPLEFT", 16 + ((i - 1) % 2) * 120, -48 - math.floor((i - 1) / 2) * 32)
-        if g[1] then
-            L.gameButtons[g[1]] = b
-            b:SetScript("OnClick", function() selectGame(g[1]) end)
-        else
-            b:SetEnabled(false)
-            local soon = font(b, FRIZ, 8, "OUTLINE", { 1, .9, .6 })
-            soon:SetPoint("BOTTOMRIGHT", -6, 3)
-            soon:SetText("SOON")
-        end
+        local b = skinButton(right, g[2], 112, 26, "dark", function() selectGame(g[1]) end, 13)
+        b:SetPoint("TOPLEFT", 16 + ((i - 1) % 2) * 120, -40 - math.floor((i - 1) / 2) * 29)
+        L.gameButtons[g[1]] = b
     end
+    local rulesBtn = skinButton(right, "Rules", 112, 26, "dark", function()
+        L.rulesBox.on = not L.rulesBox.on; refreshLobby()
+    end, 13)
+    rulesBtn:SetPoint("TOPLEFT", 136, -98)
     -- wager in gold, silver and copper, each box marked with the game's coin icon
-    L.gold = field(right, "WAGER", "0", 16, -122, 72)
-    L.silver = field(right, " ", "50", 96, -122, 72)
-    L.copper = field(right, " ", "0", 176, -122, 72)
+    L.gold = field(right, "WAGER", "0", 16, -132, 72)
+    L.silver = field(right, " ", "50", 96, -132, 72)
+    L.copper = field(right, " ", "0", 176, -132, 72)
     for _, p in ipairs({ { L.gold, "Gold" }, { L.silver, "Silver" }, { L.copper, "Copper" } }) do
         local icon = p[1]:CreateTexture(nil, "OVERLAY")
         icon:SetTexture("Interface\\MoneyFrame\\UI-" .. p[2] .. "Icon")
@@ -762,16 +1276,16 @@ local function buildLobby()
     end
     L.silver:SetMaxLetters(2)
     L.copper:SetMaxLetters(2)
-    L.start = field(right, "START NUMBER", "1000", 16, -172, 112)
-    L.seats = field(right, "SEATS (2-6)", "2", 136, -172, 112)
-    L.chips = toggle(right, "Chips only", 232)
-    L.chips:SetPoint("TOPLEFT", 16, -228)
-    L.immersive = toggle(right, "Immersive view", 232, function(on) DeathrollDB.settings.immersive = on end)
-    L.immersive:SetPoint("TOPLEFT", 16, -258)
+    L.seats = field(right, "SEATS", "2", 16, -178, 112)
+    L.start = field(right, "START NUMBER", "1000", 136, -178, 112)
+    L.chips = toggle(right, "Chips", 112)
+    L.chips:SetPoint("TOPLEFT", 16, -232)
+    L.immersive = toggle(right, "Immersive", 112, function(on) DeathrollDB.settings.immersive = on end)
+    L.immersive:SetPoint("TOPLEFT", 136, -232)
     local open = skinButton(right, "Open Table", 232, 36, "gold", function()
         if ns.Table.current() then print("|cffffd100Deathroll|r leave your current table first."); return end
         local g = ns.Games[L.game]
-        local seatsN = math.max(2, math.min(g.maxSeats, tonumber(L.seats:GetText()) or 2))
+        local seatsN = L.seats:IsShown() and math.max(2, math.min(g.maxSeats, tonumber(L.seats:GetText()) or 2)) or g.maxSeats
         local wager = (tonumber(L.gold:GetText()) or 0) * 10000 + math.min(99, tonumber(L.silver:GetText()) or 0) * 100
             + math.min(99, tonumber(L.copper:GetText()) or 0)
         if wager < 2 then print("|cffffd100Deathroll|r set a wager of at least 2 copper."); return end
@@ -780,7 +1294,6 @@ local function buildLobby()
     end, 18)
     open:SetPoint("BOTTOM", 0, 14)
     L.browse = { left, right }
-    selectGame("deathroll")
 
     -- waiting room (replaces the two browse panels while I host or sit at a table)
     local seatsPanel = panel(30, -52, 417, 350)
@@ -850,6 +1363,7 @@ local function buildLobby()
     L.ledger:SetPoint("RIGHT", lobby, "RIGHT", -46, 0)
     L.ledger:SetJustifyH("LEFT")
 
+    selectGame("deathroll")
     lobby:SetScript("OnShow", function() ns.Table.who(); refreshLobby() end)
 end
 
@@ -925,7 +1439,7 @@ function UI.handle(what, ...)
         refresh()
     elseif what == "mismatch" then
         local v = ...
-        if W.banner then W.banner:SetText(("Warning: the host reported a roll of %s that nobody saw."):format(tostring(v))) end
+        if W.banner then W.banner:SetText(("Warning: the host's table shows %s."):format(tostring(v))) end
     elseif what == "lobby" or what == "ledger" then
         refreshLobby()
     elseif what == "closed" then

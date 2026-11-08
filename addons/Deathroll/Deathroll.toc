@@ -8,7 +8,10 @@
 ## AddonCompartmentFunc: Deathroll_OnAddonCompartmentClick
 
 Rolls.lua
+Cards.lua
 Games.lua
+Blackjack.lua
+Poker.lua
 Table.lua
 Ledger.lua
 Scene.lua

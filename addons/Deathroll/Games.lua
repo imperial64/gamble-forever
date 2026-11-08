@@ -50,6 +50,11 @@ function Deathroll.expect(t)
     if t.phase == "rolling" then return t.seats[t.turn], 1, t.cur end
 end
 
+-- Rolls the host's addon makes on its own: who goes first.
+function Deathroll.hostRoll(t)
+    if t.phase == "first" then return 1, #t.seats end
+end
+
 -- The range `name` may roll right now, or nil.
 function Deathroll.rangeFor(t, name)
     local who, lo, hi = Deathroll.expect(t)
@@ -309,4 +314,39 @@ function HighLow.decode(t, f, prev)
         if tieRolled[i] then t.tieRolls[i] = same and prev.tieRolls and prev.tieRolls[i] or true end
         if tied[i] then t.tieSeats = t.tieSeats or {}; t.tieSeats[#t.tieSeats + 1] = i end
     end
+end
+
+---------------------------------------------------------------- Coinflip
+
+-- Two seats: seat 1 is heads (1), seat 2 is tails (2). The host's addon flips with /roll 1-2;
+-- the server decides, so the host flipping cannot favour anyone.
+local Coinflip = { name = "Coinflip", minSeats = 2, maxSeats = 2 }
+Games.coinflip = Coinflip
+
+function Coinflip.setup() end
+function Coinflip.start(t)
+    t.phase, t.result, t.winner, t.round = "flip", nil, nil, (t.round or 0) + 1
+end
+function Coinflip.hostRoll(t)
+    if t.phase == "flip" then return 1, 2 end
+end
+function Coinflip.rangeFor() return nil end
+function Coinflip.onRoll(t, name, value, lo, hi)
+    if t.phase ~= "flip" or not ns.Rolls.same(name, t.host) or lo ~= 1 or hi ~= 2 then return nil end
+    t.result, t.winner, t.phase = value, value, "done"
+    return { kind = "flip", value = value, winner = value }
+end
+function Coinflip.forfeit(t, seat)
+    if t.phase ~= "flip" then return nil end
+    t.winner, t.phase = 3 - seat, "done"
+    return { kind = "flip", winner = t.winner }
+end
+function Coinflip.debts(t)
+    if t.phase ~= "done" or not t.winner then return {} end
+    return { { from = t.seats[3 - t.winner], to = t.seats[t.winner], amount = t.wager } }
+end
+function Coinflip.encode(t) return { t.result or 0, t.winner or 0 } end
+function Coinflip.decode(t, f)
+    local r, w = tonumber(f[1]), tonumber(f[2])
+    t.result, t.winner = r ~= 0 and r or nil, w ~= 0 and w or nil
 end
