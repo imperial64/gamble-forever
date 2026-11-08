@@ -138,7 +138,7 @@ local function ring(angles, rx, ry)
     return out
 end
 local LAYOUT = {
-    deathroll = { seats = ring({ 180, 0, 140, 40, 220, 320 }, 560, 215), scale = 1 },
+    deathroll = { seats = ring({ 180, 0, 146, 34, 214, 326 }, 560, 215), scale = 1 },   -- top seats clear the Settle Up card
     highlow = { seats = ring({ 180, 0, 148, 32, 212, 328, 118, 62 }, 560, 220), scale = .8 },
     coinflip = { seats = { { -480, -10 }, { 480, -10 } }, scale = 1 },
     -- slot 1 is the dealer. A practice table has no dealer seat (the house deals) and the host
@@ -267,6 +267,8 @@ local function sidePanel(title)
     return p
 end
 
+local SETTLE_ROWS = 4   -- keeps the card clear of the top-left seats (deathroll seat 3 tops out at y 235)
+
 local function buildPanels()
     W.rules = sidePanel("Rules")
     W.rulesText = font(W.rules, FRIZ, 11, "", INK)
@@ -274,6 +276,33 @@ local function buildPanels()
     W.rulesText:SetWidth(300)
     W.rulesText:SetJustifyH("LEFT")
     W.rulesText:SetSpacing(2)
+
+    -- Settle Up card, top left: who pays whom once a round is over
+    local p = CreateFrame("Frame", nil, W.content)
+    p:SetSize(320, 130)
+    p:SetPoint("TOPLEFT", 14, -14)
+    p:SetFrameLevel(W.content:GetFrameLevel() + 20)
+    local bg = p:CreateTexture(nil, "BACKGROUND")
+    bg:SetTexture(art("parch"))
+    bg:SetAllPoints()
+    local title = font(p, MORPHEUS, 18, "", INK_RED)
+    title:SetPoint("TOP", 0, -10)
+    title:SetText("Settle Up")
+    p.rows = {}
+    for i = 1, SETTLE_ROWS do
+        local y = -34 - (i - 1) * 18
+        local who = font(p, FRIZ, 11, "", INK)
+        who:SetPoint("TOPLEFT", 16, y)
+        who:SetWidth(200); who:SetJustifyH("LEFT"); who:SetWordWrap(false)
+        local amt = font(p, FRIZ, 11, "", INK_RED)
+        amt:SetPoint("TOPRIGHT", -16, y)
+        amt:SetJustifyH("RIGHT")
+        p.rows[i] = { who = who, amt = amt }
+    end
+    p.foot = font(p, FRIZ, 9, "", INK)
+    p.foot:SetPoint("BOTTOM", 0, 10)
+    p:Hide()
+    W.settle = p
 
     W.hands = sidePanel("Winning Hands")
     local sub = font(W.hands, FRIZ, 9, "", INK)
@@ -874,6 +903,7 @@ local function refresh()
     local t = c.t
     local g = t.game
     local mine = ns.Table.myTurn()
+    if t.phase ~= "done" then W.settle:Hide() end
     layoutSeats(t)
     W.title:SetText(TITLES[g])
     W.dr:SetShown(g == "deathroll")
@@ -1003,11 +1033,26 @@ local function showSettled(t, debts)
         ns.sound("chipsStack1")
     end
     if #debts == 0 then return end
-    local parts = {}
-    for _, d in ipairs(debts) do parts[#parts + 1] = ("%s pays %s %s"):format(nm(d.from), nm(d.to), money(t, d.amount)) end
-    local text = table.concat(parts, "   ")
-    if not t.chips then text = text .. "   (trade it; the ledger marks it paid)" end
-    C_Timer.After(2.6, function() if W.status then W.status:SetText(text) end end)
+    local round = t.round
+    C_Timer.After(2.6, function()   -- after the stinger
+        local c = ns.Table.current()
+        if not (c and c.t.phase == "done" and c.t.round == round) then return end
+        local p = W.settle
+        local n = math.min(#debts, SETTLE_ROWS)
+        for i, r in ipairs(p.rows) do
+            local d = debts[i]
+            if i == n and #debts > n then
+                r.who:SetText(("and %d more"):format(#debts - n + 1)); r.amt:SetText("")
+            elseif i <= n then
+                r.who:SetText(nm(d.from) .. "  >  " .. nm(d.to)); r.amt:SetText(ns.coins(d.amount))
+            else
+                r.who:SetText(""); r.amt:SetText("")
+            end
+        end
+        p.foot:SetText(t.chips and "Chips only: no gold changes hands." or "Trade it; the ledger marks it paid.")
+        p:SetHeight(34 + n * 18 + 26)
+        p:Show()
+    end)
 end
 
 ---------------------------------------------------------------- lobby

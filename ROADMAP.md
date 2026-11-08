@@ -8,6 +8,8 @@ Backlog from playtests. Highest priority first.
 
 ## Done
 
+- **B6 Payouts hidden behind the bottom seat's nameplate.** "X pays Y" ran along the status line under the bottom seat. It is now a parchment "Settle Up" card in the empty top-left corner (up to 4 rows, then "and N more"), shown after the round's stinger and hidden when the next round starts. Deathroll's corner seats moved slightly lower to clear it. Reported in chat 2026-11-08 with a Hold'em screenshot.
+
 - **B5 Renamed the addon to GambleForever.** At least six CurseForge addons are called DeathRoll-something, and DeathRoll Enhancer and Deathroll Companion also take `/dr` and `/deathroll`. Now `/gf` and `/gamble`, folder and prefix `GambleForever`, saved data `GambleForeverDB` (the old `DeathrollDB` ledger is not carried over). The Deathroll game keeps its name. The repo folder is still `deathroll`. [playtest 1](feedback/2026-11-08-playtest-1.md)
 - **B1 Chat spam "No player named 'Efe' is currently playing."** A solo table whispered every state update to the player's own first name. Solo messages now loop back locally; the UI smoke test fails if a solo table sends anything. [playtest 1](feedback/2026-11-08-playtest-1.md)
 - **B2 Cards drawn as green rectangles.** Kenney's card PNGs are 2-bit palette images, which Forever does not draw. All media is now 8-bit RGBA (`scripts/fix-png.py`) and the install script refuses other PNG formats. [playtest 1](feedback/2026-11-08-playtest-1.md)
